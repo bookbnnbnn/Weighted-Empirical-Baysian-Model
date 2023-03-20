@@ -1,3 +1,5 @@
 experiment
 *.ipynb_checkpoints
 *.pyc
+*dataset
+.DS_Store
