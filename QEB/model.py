@@ -3,6 +3,7 @@ import pandas as pd
 import random
 from scipy.optimize import minimize
 from typing import List, Dict, Tuple, Union
+from QEB.utils import *
 
 random.seed(0)
 np.random.seed(0)
@@ -15,7 +16,8 @@ class QEB:
             sigma_0: int = 0.5,
             numbers_of_each_type: Dict[str, int] = {"A": 3, "B": 2},
             adjustment: Dict[str, List[int]] = {"A": [1] * 3, "B": [1.2] * 2},
-            grid_points: np.ndarray = np.repeat(np.array([1, 2, 3]), 20),
+            distances_to_center: Dict[str, List[np.ndarray]] = {"A": np.repeat(np.array([1, 2, 3]), 20),
+                                                                "B": np.repeat(np.array([1, 2, 3]), 20)},
             variances_of_error: Dict[str, List[int]] = {"A": [1] * 3, "B": [1.5] * 2},
     ) -> Dict[str, np.ndarray]:
         """
@@ -31,7 +33,7 @@ class QEB:
             The number of sample size in each type of amino acid
         adjustment: Dict[str, List[int]]
             The adjustment to fit gaussian in each type of amino acid
-        grid_points: np.ndarray
+        distances_to_center:  Dict[str, List[np.ndarray]]
             The distances of grid points to the center of amino acid
         variances_of_error: Dict[str, List[int]]
             The variances of errors which is also a gaussian distribution
@@ -47,27 +49,49 @@ class QEB:
         self.sigma_0 = sigma_0
         self.numbers_of_each_type = numbers_of_each_type
         self.adjustment = adjustment
-        self.grid_points = grid_points
+        self.distances_to_center = distances_to_center
         self.variances_of_error = variances_of_error
-        self.X_k = - 1 / 2 * grid_points**2
         self.types_of_proteins = len(numbers_of_each_type)
 
-        self.beta = {
-            key: np.abs(
-                np.random.normal(
-                    self.mu_0,
-                    self.sigma_0)) for key in numbers_of_each_type.keys()}
+        self.beta = {key: np.abs(np.random.normal(self.mu_0, self.sigma_0))
+                     for key in numbers_of_each_type.keys()}
         self.data_log = {}
         for type_j, sample_size in numbers_of_each_type.items():
             beta = self.beta[type_j]
-            epsilon = np.array([np.random.normal(0, variance, grid_points.shape)
+            center_distances = distances_to_center[type_j]
+            X_k = - 1 / 2 * center_distances**2
+            epsilon = np.array([np.random.normal(0, variance, center_distances.shape)
                                for variance in variances_of_error[type_j]])
             A_ij = adjustment[type_j]
             A_ij_tilde = -3 / 2 * np.log(2 * np.pi * 1 / beta) + np.log(A_ij)
             data_list = []
             for i in range(sample_size):
-                data_list.append(A_ij_tilde[i] + beta * self.X_k + epsilon[i])
+                data_list.append(A_ij_tilde[i] + beta * X_k + epsilon[i])
             self.data_log[type_j] = np.array(data_list)
+        return self.data_log
+
+    def read_data(
+            self,
+            root_map: str,
+            root_pdb: str,
+            atomic: str = None,
+            start_rad: Union[int, float] = 0.01,
+            max_rad: Union[int, float] = 1.5,
+            gap: Union[int, float] = 0.01,
+            max_points: Union[int, float] = 8,
+            base_num_points: Union[int, float] = 4,
+            max_iter: Union[int, float] = 30):
+        """Read data"""
+        data, grid_size, origin = read_map(root_map)
+        df_processed = read_pdb(root_pdb, atomic=atomic)
+        self.numbers_of_each_type = dict(
+            df_processed.groupby("residue_name").count()["atom_number"])
+        self.grid_points, self.distances_to_center = generate_grid_points(
+            df_processed, start_rad, max_rad, gap, max_points, base_num_points, max_iter)
+        interp_func = interpolator(data, grid_size, origin)
+        self.data = {key: interp_func(grid_points) for key, grid_points in self.grid_points.items()}
+        self.data_log = {key: np.log(value + 1e-35) for key, value in self.data.items()}
+
         return self.data_log
 
     def caculate_constants(self) -> Tuple[Dict[str, np.ndarray]]:
@@ -94,10 +118,8 @@ class QEB:
                     for key in self.numbers_of_each_type.keys()}
         self.D_j = {key: np.array([])
                     for key in self.numbers_of_each_type.keys()}
-        self.sigma_j_bar = {
-            key: np.array(
-                []) for key in self.numbers_of_each_type.keys()}
-        X_k_distance = self.X_k.mean()
+        self.sigma_j_bar = {key: np.array([])
+                            for key in self.numbers_of_each_type.keys()}
         for type_j, sample_size in self.numbers_of_each_type.items():
             estimated_A_ij_tilde_list = []
             estimated_variance = []
@@ -106,21 +128,23 @@ class QEB:
             D_j_list = []
             sigma_j_bar = 1
             data_log_arr = self.data_log[type_j]
+            center_distances = self.distances_to_center[type_j]
+            X_k = - 1 / 2 * center_distances**2
             for i in range(sample_size):
                 data_log = data_log_arr[i]
-                cov = np.cov(self.X_k, data_log)[0, 1]
-                var = np.var(self.X_k)
+                cov = np.cov(X_k, data_log)[0, 1]
+                var = np.var(X_k)
                 beta_ols = cov / var
-                A_ij = data_log.mean() - beta_ols * X_k_distance
-                variance = sum(
-                    (data_log - (A_ij + self.X_k * beta_ols))**2) / (data_log.shape[0] - 1)
+                A_ij = data_log.mean() - beta_ols * X_k.mean()
+                variance = sum((data_log - (A_ij + X_k * beta_ols))
+                               ** 2) / (data_log.shape[0] - 1)
                 estimated_A_ij_tilde_list.append(A_ij)
                 estimated_variance.append(variance)
                 # Sum `k`
                 B_j_list.append(sum((data_log - A_ij)**2 / (2 * variance)))
                 C_j_list.append(
-                    sum((data_log - A_ij) * self.grid_points**2 / (2 * variance)))
-                D_j_list.append(sum(self.grid_points**4 / (8 * variance)))
+                    sum((data_log - A_ij) * center_distances**2 / (2 * variance)))
+                D_j_list.append(sum(center_distances**4 / (8 * variance)))
                 sigma_j_bar *= variance
             self.estimated_A_ij_tilde[type_j] = np.array(
                 estimated_A_ij_tilde_list)
