@@ -6,25 +6,57 @@ from mrcfile import open as mrc_open
 from scipy.interpolate import RegularGridInterpolator
 from tqdm.auto import tqdm
 from itertools import filterfalse
-from typing import List, Dict, Tuple, Union
+from scipy.stats import norm
+from collections import Counter
+from typing import List, Dict, Tuple, Optional
 
 
 def read_map(root: str) -> Tuple[np.ndarray]:
+    """
+    Read the density map from `map` file
+
+    Params
+    ----------
+    root: str
+        The root of `map` data 
+
+    Return
+    ----------
+    data: np.ndarray
+        The density in each coordinate from `map` data
+    grid_size: np.ndarray
+        The grid size of `map` data
+    origin: np.ndarray
+        The origin coordinate of `map` data
+    """
 
     with mrc_open(root, permissive=True) as mrc:
         header = mrc.header
         data = mrc.data
-    # Data need to transform since the shape of `map` file does not fit
+    # Data need to transform since the shape of `map` file does not fit to `pdb` file
     data = np.einsum('zyx->xyz', data)
     data = (data > 0) * data
     origin = np.array(header["origin"].item())
     grid_size = np.array(header["cella"].item()) / data.shape
     return data, grid_size, origin
 
-def read_pdb(
-        root: str, 
-        atomic: str = None
-        ) -> pd.DataFrame:
+def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
+    """
+    Read atomic model from `pdb` file
+
+    Params
+    ----------
+    root: str
+        The root of `map` data 
+    atomic: str
+        The chosen atomic that we only consider
+
+    Return
+    ----------
+    pd.DataFrame
+        The dataframe contained data that we only consider
+    """
+
     ppdb = PandasPdb().read_pdb(root)
     df = ppdb.df['ATOM']
     if atomic is not None:
@@ -40,14 +72,34 @@ def read_pdb(
     else:
         return df
 
-# my method
 def generate_points_on_sphere(
-        radius: Union[int, float] = 1, 
+        radius: float = 1, 
         num_points: int = 8, 
-        center_x: Union[int, float] = 0, 
-        center_y: Union[int, float] = 0, 
-        center_z: Union[int, float] = 0
-        ) -> np.ndarray:
+        center_x: float = 0, 
+        center_y: float = 0, 
+        center_z: float = 0
+    ) -> np.ndarray:
+    """
+    Construct the grid points, whose denses are equal on shpere for the specific radius from the center
+
+    Params
+    ----------
+    radius: float
+        The radius for the specific radius from the center
+    num_points: int
+        The number of points that we want to make on the sphere
+    center_x: float
+        The number of center in x coordinate
+    center_y: float
+        The number of center in y coordinate
+    center_z: float
+        The number of center in z coordinate
+
+    Return
+    ----------
+    points: np.ndarray
+        The grid points that we construct
+    """
     n = np.arange(1, num_points+1)
     phi = (np.sqrt(5) - 1) / 2
     z = (2*n - 1) / num_points - 1
@@ -57,26 +109,52 @@ def generate_points_on_sphere(
     return points 
 
 def generate_grid_points(
-        df_processed,
-        start_rad=0.01,
-        max_rad=1.5,
-        gap=0.01,
-        max_points=8,
-        base_num_points=4,
-        max_iter=30
-):
+        df_processed: pd.DataFrame,
+        start_rad: float = 0.01,
+        max_rad: float = 1.5,
+        gap: float= 0.01,
+        max_points: int = 8,
+        base_num_points: int = 4,
+        max_iter: int = 30
+) -> Tuple[Dict[str, List[np.ndarray]]]:
+    """
+    Generate grid points from each center that we chose from atomic model
+
+    Params
+    ----------
+    df_processed: pd.DataFrame
+        The processed dataframe 
+    start_rad: float = 0.01
+        The radius that we want to start off generating grid points
+    max_rad: float = 1.5
+        The maximal radius 
+    gap: float= 0.01
+        The gap for each radius
+    max_points: int = 8
+        The maximal number of points 
+    base_num_points: int = 4
+        The based number of points in the shortest radius
+    max_iter: int = 30
+        The maximal iteration that we want to find the grid points
+
+    Return
+    ----------
+    grid_points_chosen: Dict[str, List[np.ndarray]]
+        The generated grid points
+    distances_to_center: Dict[str, List[np.ndarray]]
+        The distances(radius) of grid points to center respectively
+    """
     atom_points = np.column_stack(
         (df_processed.x_coord, df_processed.y_coord, df_processed.z_coord))
     rads = np.round(np.arange(start_rad, max_rad, gap), 2)
-    all_grid_points = {}
-    distances_to_center = {}
+    grid_points_chosen = {name: [] for name in df_processed["residue_name"].unique()}
+    distances_to_center = {name: [] for name in df_processed["residue_name"].unique()}
     # for atomic_index in tqdm(range(len(df_processed))):
-    for atomic_index in tqdm(range(10)):
+    for atomic_index in tqdm(range(100)):
         grid_points = {}
-        name = tuple(df_processed.iloc[atomic_index, :][[
-                     "residue_name", "chain_id", "residue_number"]])
-        distances_to_center[name] = []
-        all_grid_points[name] = []
+        name = df_processed.iloc[atomic_index, :]["residue_name"]
+        all_distances_to_center = []
+        all_grid_points = []
         for rad in rads:
             # The number of grid points we want to search depends on the dense of the ball
             num_points = int((rad**2 / start_rad**2) * base_num_points)
@@ -113,15 +191,35 @@ def generate_grid_points(
                     grid_points = list(filterfalse(
                         lambda item: not item, grid_points))
                     print("There are some grid points that could not be found.")
-            distances_to_center[name].extend([rad] * len(grid_points))
-            all_grid_points[name].extend(grid_points)
-    return all_grid_points, distances_to_center
+            all_distances_to_center.extend([rad] * len(grid_points))
+            all_grid_points.extend(grid_points)
+        grid_points_chosen[name].append(np.array(all_grid_points))
+        distances_to_center[name].append(np.array(all_distances_to_center))
+    # grid_points_chosen = {name: np.array(points) for name, points in grid_points_chosen.items()}
+    return grid_points_chosen, distances_to_center
 
 def interpolator(
         data: np.ndarray, 
         grid_size: np.ndarray, 
         origin: np.ndarray
-        ) -> RegularGridInterpolator:
+) -> RegularGridInterpolator:
+    """
+    Interpolates 3D data on a regular grid.
+
+    Params
+    ----------
+    data: np.ndarray
+        3D array of data to be interpolated.
+    grid_size: np.ndarray
+        Array of size 3 representing the grid size in each dimension.
+    origin: np.ndarray
+        Array of size 3 representing the origin point of the grid.
+
+    Return
+    ----------
+    RegularGridInterpolator: Interpolation function.
+
+    """
     nx, ny, nz = data.shape[0], data.shape[1], data.shape[2]
     x = np.linspace(0, nx - 1, nx) * grid_size[0] + origin[0]
     y = np.linspace(0, ny - 1, ny) * grid_size[1] + origin[1]
@@ -129,8 +227,163 @@ def interpolator(
     interp_func = RegularGridInterpolator((x, y, z), data)
     return interp_func
 
-
-
-
-
+def estimate_density(
+        grid_points_chosen: Dict[str, List[np.ndarray]], 
+        distances_to_center: Dict[str, List[np.ndarray]], 
+        interp_func: callable, 
+        bayes_beta: Dict[str, float], 
+        estimated_A_ij_tilde: Dict[str, np.ndarray],
+) -> Tuple[
+        Dict[str, List[List[float]]], 
+        Dict[str, List[List[float]]], 
+        Dict[str, List[List[float]]]
+]:
+    """
+    Given the interpolation function from the density map, construct the 
+    densities on the atomic model corresponding to their coordinates. 
     
+    Params
+    ----------
+    grid_points_chosen: 
+        The dictionary of grid points chosen for each radius.
+    distances_to_center: 
+        The dictionary of distances to the center for each radius.
+    interp_func: 
+        The callable interpolation function.
+    bayes_beta: 
+        The dictionary of Bayesian beta values for each radius.
+    estimated_A_ij_tilde: 
+        The dictionary of estimated values of A_ij_tilde for each radius.
+    estimated_means_of_error: 
+        The dictionary of estimated means of error for each radius.
+    
+    Return
+    ----------
+    radius_density: 
+        The dictionary of mean densities for each grid point radius.
+    estimated_radius_density: 
+        The dictionary of estimated mean densities for each grid point radius.
+    qscore_radius_density: 
+        The dictionary of qscore mean densities for each grid point radius.
+    """
+    radius_density = {key: [] for key in grid_points_chosen.keys()}
+    estimated_radius_density = {key: [] for key in grid_points_chosen.keys()}
+    qscore_radius_density = {key: [] for key in grid_points_chosen.keys()}
+    for key, value in grid_points_chosen.items():
+        for i in range(len(value)):
+            counter = Counter(distances_to_center[key][i])
+            grid_points = grid_points_chosen[key][i]
+            A_ij_tilde = estimated_A_ij_tilde[key][i]
+            mean_densities = []
+            estimated_mean_densities = []
+            qscore_mean_densities = []
+            start = 0
+            densities = interp_func(grid_points)
+            m = densities.mean()
+            std = densities.std()
+            A = m + 10 * std
+            B = m - std
+            for distance, num in counter.items():
+                mean_densities.append(densities[start: start + num].mean())
+                X_k = - 1 / 2 * distance**2
+                estimated_mean_densities.append(np.exp(A_ij_tilde + X_k * bayes_beta[key]))
+                qscore_mean_densities.append((2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*distance**2) * A + B)
+                start += num
+            radius_density[key].append(mean_densities)
+            estimated_radius_density[key].append(estimated_mean_densities)
+            qscore_radius_density[key].append(qscore_mean_densities)
+    return radius_density, estimated_radius_density, qscore_radius_density
+
+def plot_density(
+    radius_density, 
+    bayes_beta, 
+    estimated_A_ij_tilde,
+    amino_acid = None, 
+    indexes = None, 
+    start_rad=0.01,
+    max_rad=0.8,
+    gap=0.01,
+):
+    x_axis = np.arange(start_rad, max_rad, gap)
+    # If not choose specific amino acid, then plot all types
+    radius_density = {amino_acid: radius_density[amino_acid]} if amino_acid is not None else radius_density
+    estimated_A_ij_tilde = {amino_acid: estimated_A_ij_tilde[amino_acid]}if amino_acid is not None else estimated_A_ij_tilde
+    for key, mean_densities in radius_density.items():
+        estimated_sigma = np.sqrt(1 / bayes_beta[key])
+        A_ij_tilde = estimated_A_ij_tilde[key]
+        mean_densities = np.array(mean_densities)[indexes] if indexes is not None else mean_densities
+        indexes = indexes if indexes is not None else list(range(len(mean_densities)))
+        for index, mean_density in zip(indexes, mean_densities):
+            plt.plot(x_axis, mean_density)
+            estimated_adjust_ment = np.exp(A_ij_tilde[index] + 3/2 * (np.log(2 * np.pi * estimated_sigma**2)))
+            plt.plot(x_axis, norm.pdf(x_axis, 0, estimated_sigma)*estimated_adjust_ment, "--", label="estimaed gaussian", c="red")
+            plt.legend()
+            plt.title(key)
+            plt.show()
+    
+
+def plot_density(
+    radius_density: Dict[str, np.ndarray], 
+    estimated_radius_density: Dict[str, np.ndarray],
+    qscore_radius_density: Dict[str, np.ndarray],
+    A_B: Tuple[float, float],
+    amino_acid: Optional[str] = None, 
+    indexes: Optional[List[int]] = None, 
+    start_rad: float = 0.01,
+    max_rad: float = 0.8,
+    gap: float = 0.01,
+    compared: bool = False,
+    estimated: bool = True
+) -> None:
+    """
+    Plots cryo-EM map density, estimated Gaussian in QEB, Gaussian in qscore. 
+
+    Parameters:
+    -----------
+    radius_density: dict[str, np.ndarray]
+        The dictionary of radius densities.
+    estimated_radius_density: dict[str, np.ndarray]
+        The dictionary of estimated radius densities in QEB.
+    qscore_radius_density: dict[str, np.ndarray]
+        The dictionary of qscore radius densities in qscore.
+    A_B: tuple[float, float]
+        The tuple of coefficients.
+    amino_acid: Optional[str] (default=None)
+        An amino acid to plot. If None, all amino acids are plotted.
+    indexes: Optional[List[int]] (default=None)
+        Indexes of radius densities to plot.
+    start_rad: float (default=0.01)
+        The start of the radius.
+    max_rad: float (default=0.8)
+        The maximum radius.
+    gap: float (default=0.01)
+        The distance between two radius. 
+    compared: bool (default=False)
+        Whether to compare the estimated Gaussian with the Gaussian in qscore.
+    estimated: bool (default=True)
+        Whether to plot the estimated Gaussian.
+    """
+    x_axis = np.arange(start_rad, max_rad, gap)
+    # If not choose specific amino acid, then plot all types
+    radius_density = {amino_acid: radius_density[amino_acid]} if amino_acid is not None else radius_density
+    estimated_radius_density = {amino_acid: estimated_radius_density[amino_acid]} if amino_acid is not None else estimated_radius_density
+    qscore_radius_density = {amino_acid: qscore_radius_density[amino_acid]} if amino_acid is not None else qscore_radius_density
+    for key, mean_densities in radius_density.items():
+        mean_densities = np.array(mean_densities)[indexes] if indexes is not None else mean_densities
+        estimated_mean_densities = np.array(estimated_radius_density[key]) if indexes is not None else estimated_radius_density[key]
+        qscore_mean_densities = np.array(qscore_radius_density[key]) if indexes is not None else qscore_radius_density[key]
+        indexes = indexes if indexes is not None else list(range(len(mean_densities)))
+        for index, mean_density in zip(indexes, mean_densities):
+            plt.plot(x_axis, mean_density, label="cryo-EM map density")
+            if estimated:
+                plt.plot(x_axis, estimated_mean_densities[index], "--", label="estimaed gaussian")
+                plt.plot(x_axis, (2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*x_axis**2)*A_B[0] + A_B[1], label="gaussian in qscore?")
+                plt.plot(x_axis, qscore_mean_densities[index], label="gaussian in qscore?")
+            plt.xlabel("Distance to the Center (Anstrom)")
+            plt.ylabel("Density")
+            plt.title(key)
+            if not compared:
+                plt.legend()
+                plt.show()
+        indexes = None
+        plt.show()
