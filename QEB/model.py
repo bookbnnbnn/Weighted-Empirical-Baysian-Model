@@ -16,8 +16,8 @@ class QEB:
             sigma_0: int = 0.5,
             numbers_of_each_type: Dict[str, int] = {"A": 3, "B": 2},
             adjustment: Dict[str, List[int]] = {"A": [1] * 3, "B": [1.2] * 2},
-            distances_to_center: Dict[str, List[np.ndarray]] = {"A": np.repeat(np.array([1, 2, 3]), 20),
-                                                                "B": np.repeat(np.array([1, 2, 3]), 20)},
+            distances_to_center: Dict[str, List[np.ndarray]] = {"A": [np.repeat(np.array([1, 2, 3]), 1000)]*3,
+                                                                "B": [np.repeat(np.array([1, 2, 3]), 1000)]*2},
             variances_of_error: Dict[str, List[int]] = {"A": [1] * 3, "B": [1.5] * 2},
     ) -> Dict[str, np.ndarray]:
         """
@@ -59,14 +59,16 @@ class QEB:
         for type_j, sample_size in numbers_of_each_type.items():
             beta = self.beta[type_j]
             center_distances = distances_to_center[type_j]
-            X_k = - 1 / 2 * center_distances**2
-            epsilon = np.array([np.random.normal(0, variance, center_distances.shape)
-                               for variance in variances_of_error[type_j]])
+            # epsilon = np.array([np.random.normal(0, variance, center_distances.shape)
+            #                    for variance in variances_of_error[type_j]])
+            variance = variances_of_error[type_j]
             A_ij = adjustment[type_j]
             A_ij_tilde = -3 / 2 * np.log(2 * np.pi * 1 / beta) + np.log(A_ij)
             data_list = []
             for i in range(sample_size):
-                data_list.append(A_ij_tilde[i] + beta * X_k + epsilon[i])
+                X_k = - 1 / 2 * center_distances[i]**2
+                epsilon = np.random.normal(0, variance[i])
+                data_list.append(A_ij_tilde[i] + beta * X_k + epsilon)
             self.data_log[type_j] = np.array(data_list)
         return self.data_log
 
@@ -76,22 +78,22 @@ class QEB:
             root_pdb: str,
             atomic: str = None,
             start_rad: Union[int, float] = 0.01,
-            max_rad: Union[int, float] = 1.5,
+            max_rad: Union[int, float] = 1,
             gap: Union[int, float] = 0.01,
             max_points: Union[int, float] = 8,
             base_num_points: Union[int, float] = 4,
             max_iter: Union[int, float] = 30):
         """Read data"""
         data, grid_size, origin = read_map(root_map)
+        mean, std = np.mean(data), np.std(data)
+        self.A_B = mean + 10 * std, mean - std
         df_processed = read_pdb(root_pdb, atomic=atomic)
-        self.numbers_of_each_type = dict(
-            df_processed.groupby("residue_name").count()["atom_number"])
         self.grid_points, self.distances_to_center = generate_grid_points(
             df_processed, start_rad, max_rad, gap, max_points, base_num_points, max_iter)
-        interp_func = interpolator(data, grid_size, origin)
-        self.data = {key: interp_func(grid_points) for key, grid_points in self.grid_points.items()}
+        self.interp_func = interpolator(data, grid_size, origin)
+        self.data = {key: self.interp_func(grid_points) for key, grid_points in self.grid_points.items()}
         self.data_log = {key: np.log(value + 1e-35) for key, value in self.data.items()}
-
+        self.numbers_of_each_type = {atom: len(self.data_log[atom]) for atom in self.data_log.keys()}
         return self.data_log
 
     def caculate_constants(self) -> Tuple[Dict[str, np.ndarray]]:
@@ -99,9 +101,6 @@ class QEB:
         Estimate `A_ij_tilde` by simple linear regression solved by OLS.
         Estimate `epsilon_ij` by MSE.
         Caculate the constants of `B_j`, `C_j`, `D_j` `sigma_j_bar` before caculate log likelihood function.
-
-        Params
-        ----------
 
         Return
         ----------
@@ -118,20 +117,18 @@ class QEB:
                     for key in self.numbers_of_each_type.keys()}
         self.D_j = {key: np.array([])
                     for key in self.numbers_of_each_type.keys()}
-        self.sigma_j_bar = {key: np.array([])
-                            for key in self.numbers_of_each_type.keys()}
         for type_j, sample_size in self.numbers_of_each_type.items():
             estimated_A_ij_tilde_list = []
             estimated_variance = []
             B_j_list = []
             C_j_list = []
             D_j_list = []
-            sigma_j_bar = 1
             data_log_arr = self.data_log[type_j]
-            center_distances = self.distances_to_center[type_j]
-            X_k = - 1 / 2 * center_distances**2
+            center_distances_list = self.distances_to_center[type_j]
             for i in range(sample_size):
                 data_log = data_log_arr[i]
+                center_distances = center_distances_list[i]
+                X_k = - 1 / 2 * center_distances**2
                 cov = np.cov(X_k, data_log)[0, 1]
                 var = np.var(X_k)
                 beta_ols = cov / var
@@ -145,7 +142,6 @@ class QEB:
                 C_j_list.append(
                     sum((data_log - A_ij) * center_distances**2 / (2 * variance)))
                 D_j_list.append(sum(center_distances**4 / (8 * variance)))
-                sigma_j_bar *= variance
             self.estimated_A_ij_tilde[type_j] = np.array(
                 estimated_A_ij_tilde_list)
             self.estimated_variances_of_error[type_j] = np.array(
@@ -154,9 +150,8 @@ class QEB:
             self.B_j[type_j] = -sum(B_j_list)
             self.C_j[type_j] = -sum(C_j_list)
             self.D_j[type_j] = -sum(D_j_list)
-            self.sigma_j_bar[type_j] = sigma_j_bar
 
-        return self.estimated_A_ij_tilde, self.B_j, self.C_j, self.D_j, self.sigma_j_bar
+        return self.estimated_A_ij_tilde, self.B_j, self.C_j, self.D_j
 
     def negative_log_likelihood(
             self, params: Tuple[Union[int, float]]) -> float:
@@ -177,17 +172,13 @@ class QEB:
         B_j = np.array([value for value in self.B_j.values()])
         C_j = np.array([value for value in self.C_j.values()])
         D_j = np.array([value for value in self.D_j.values()])
-        sigma_j_bar = np.array([value for value in self.sigma_j_bar.values()])
         E_j = 1 - 2 * sigma_0 * D_j
-        return -sum(-1 / 2 * np.log(sigma_j_bar * E_j) - (sigma_0 * (4 * B_j * \
+        return -sum(-1 / 2 * (np.log(E_j)) - (sigma_0 * (4 * B_j * \
                     D_j - C_j**2) - 2 * mu_0 * C_j - 2 * B_j - 2 * mu_0**2 * D_j) / (2 * E_j))
 
     def estimate_hyperparameters_by_mle(self) -> Tuple[Union[int, float]]:
         """
         Estimate the hyperparameters, `mu_0` and `sigma_0`, of Gaussian distribution by mle.
-
-        Params
-        ----------
 
         Return
         ----------
@@ -195,16 +186,13 @@ class QEB:
             The estimators of `mu_0` and `sigma_0`
         """
         self.res = minimize(self.negative_log_likelihood,
-                            (2, 0.5), method='Nelder-Mead')
+                            (2, 0.5), method='Nelder-Mead', bounds=((None, None), (0, None)))
         self.mu_0_hat, self.sigma_0_hat = self.res.x
         return self.mu_0_hat, self.sigma_0_hat
 
     def estimate_beta_1j_by_Bayse(self) -> Dict[str, np.ndarray]:
         """
         Estimate `beta_1j` by bayes' estimator.
-
-        Params
-        ----------
 
         Return
         ----------
@@ -219,3 +207,47 @@ class QEB:
             key: value for key, value in zip(
                 self.C_j.keys(), beta_1j_hat)}
         return self.beta_1j_hat
+
+    def calculate_qeb_score(self) -> Dict[str, List[float]]:
+        """
+        Calculates the Q-score for each amino acid residue in the protein structure.
+        
+        Return
+        ----------
+        Dict[str, List[float]
+            A dictionary of Q-scores for each amino acid residue.
+        """
+        self.qeb_score = {key: [] for key in self.data.keys()}
+        self.estimated_data = {key: [] for key in self.data.keys()}
+        for amino_acid, densities in self.data.items():
+            # Calculate estimated densities from empirical baysian model
+            X_k = - 1 / 2 * np.array(self.distances_to_center[amino_acid])**2
+            A_ij_tilde = self.estimated_A_ij_tilde[amino_acid].reshape(-1, 1)
+            beta_1j = self.beta_1j_hat[amino_acid].reshape(-1, 1)
+            estimated_densities = np.exp(A_ij_tilde + X_k * beta_1j)
+            self.estimated_data[amino_acid] = estimated_densities
+            for num in range(estimated_densities.shape[0]):
+                # Get density and estimated_density at current index
+                density = densities[num]
+                estimated_density = estimated_densities[num]
+                # Calculate dot product and distance between density and estimated_density
+                dot = np.dot(density - density.mean(), estimated_density - estimated_density.mean())
+                distance = (np.linalg.norm(density - density.mean()) * np.linalg.norm(estimated_density - estimated_density.mean()))
+                self.qeb_score[amino_acid].append(dot / distance)
+        return self.qeb_score
+
+
+    def plot_data(
+            self, 
+            amino_acid = None, 
+            indexes = None, 
+            start_rad=0.01,
+            max_rad=0.8,
+            gap=0.01,
+            compared=False,
+            estimated=True
+            ):
+        self.radius_density, self.estimated_radius_density, self.qscore_radius_density = estimate_density(
+            self.grid_points, self.distances_to_center, self.interp_func, self.beta_1j_hat, self.estimated_A_ij_tilde)
+        plot_density(self.radius_density, self.estimated_radius_density, self.qscore_radius_density, self.A_B ,
+                     amino_acid, indexes, start_rad, max_rad, gap, compared, estimated)
