@@ -124,17 +124,17 @@ def generate_grid_points(
     ----------
     df_processed: pd.DataFrame
         The processed dataframe 
-    start_rad: float = 0.01
-        The radius that we want to start off generating grid points
-    max_rad: float = 1.5
-        The maximal radius 
-    gap: float= 0.01
-        The gap for each radius
-    max_points: int = 8
-        The maximal number of points 
-    base_num_points: int = 4
-        The based number of points in the shortest radius
-    max_iter: int = 30
+    start_rad: float (default=0.01)
+            Minimum radius for generating grid points. 
+    max_rad: float (default=0.8)
+        Maximum radius for generating grid points. 
+    gap: float (default=0.01)
+        Gap between radii for generating grid points. 
+    max_points: int (default=8)
+        Maximum number of points to generate at each radius. 
+    base_num_points: int (default=4)
+        Number of points to generate at the minimum radius. 
+    max_iter: int (default=30)
         The maximal iteration that we want to find the grid points
 
     Return
@@ -295,34 +295,6 @@ def estimate_density(
     return radius_density, estimated_radius_density, qscore_radius_density
 
 def plot_density(
-    radius_density, 
-    bayes_beta, 
-    estimated_A_ij_tilde,
-    amino_acid = None, 
-    indexes = None, 
-    start_rad=0.01,
-    max_rad=0.8,
-    gap=0.01,
-):
-    x_axis = np.arange(start_rad, max_rad, gap)
-    # If not choose specific amino acid, then plot all types
-    radius_density = {amino_acid: radius_density[amino_acid]} if amino_acid is not None else radius_density
-    estimated_A_ij_tilde = {amino_acid: estimated_A_ij_tilde[amino_acid]}if amino_acid is not None else estimated_A_ij_tilde
-    for key, mean_densities in radius_density.items():
-        estimated_sigma = np.sqrt(1 / bayes_beta[key])
-        A_ij_tilde = estimated_A_ij_tilde[key]
-        mean_densities = np.array(mean_densities)[indexes] if indexes is not None else mean_densities
-        indexes = indexes if indexes is not None else list(range(len(mean_densities)))
-        for index, mean_density in zip(indexes, mean_densities):
-            plt.plot(x_axis, mean_density)
-            estimated_adjust_ment = np.exp(A_ij_tilde[index] + 3/2 * (np.log(2 * np.pi * estimated_sigma**2)))
-            plt.plot(x_axis, norm.pdf(x_axis, 0, estimated_sigma)*estimated_adjust_ment, "--", label="estimaed gaussian", c="red")
-            plt.legend()
-            plt.title(key)
-            plt.show()
-    
-
-def plot_density(
     radius_density: Dict[str, np.ndarray], 
     estimated_radius_density: Dict[str, np.ndarray],
     qscore_radius_density: Dict[str, np.ndarray],
@@ -353,15 +325,19 @@ def plot_density(
     indexes: Optional[List[int]] (default=None)
         Indexes of radius densities to plot.
     start_rad: float (default=0.01)
-        The start of the radius.
+            Minimum radius for generating grid points. 
     max_rad: float (default=0.8)
-        The maximum radius.
+        Maximum radius for generating grid points. 
     gap: float (default=0.01)
-        The distance between two radius. 
+        Gap between radii for generating grid points. 
     compared: bool (default=False)
         Whether to compare the estimated Gaussian with the Gaussian in qscore.
     estimated: bool (default=True)
         Whether to plot the estimated Gaussian.
+
+    Return
+    ----------
+    None
     """
     x_axis = np.arange(start_rad, max_rad, gap)
     # If not choose specific amino acid, then plot all types
