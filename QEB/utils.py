@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib
 from biopandas.pdb import PandasPdb
 from mrcfile import open as mrc_open
 from scipy.interpolate import RegularGridInterpolator
@@ -149,8 +150,8 @@ def generate_grid_points(
     rads = np.round(np.arange(start_rad, max_rad, gap), 2)
     grid_points_chosen = {name: [] for name in df_processed["residue_name"].unique()}
     distances_to_center = {name: [] for name in df_processed["residue_name"].unique()}
-    # for atomic_index in tqdm(range(len(df_processed))):
-    for atomic_index in tqdm(range(100)):
+    for atomic_index in tqdm(range(len(df_processed))):
+    # for atomic_index in tqdm(range(100)):
         grid_points = {}
         name = df_processed.iloc[atomic_index, :]["residue_name"]
         all_distances_to_center = []
@@ -299,13 +300,14 @@ def plot_density(
     estimated_radius_density: Dict[str, np.ndarray],
     qscore_radius_density: Dict[str, np.ndarray],
     A_B: Tuple[float, float],
+    qscores, 
     amino_acid: Optional[str] = None, 
     indexes: Optional[List[int]] = None, 
     start_rad: float = 0.01,
     max_rad: float = 0.8,
     gap: float = 0.01,
     compared: bool = False,
-    estimated: bool = True
+    estimated: bool = True, 
 ) -> None:
     """
     Plots cryo-EM map density, estimated Gaussian in QEB, Gaussian in qscore. 
@@ -347,19 +349,26 @@ def plot_density(
     for key, mean_densities in radius_density.items():
         mean_densities = np.array(mean_densities)[indexes] if indexes is not None else mean_densities
         estimated_mean_densities = np.array(estimated_radius_density[key]) if indexes is not None else estimated_radius_density[key]
+        qscores = np.array(qscores[key]) if qscores is not None else qscores[key]
+
         qscore_mean_densities = np.array(qscore_radius_density[key]) if indexes is not None else qscore_radius_density[key]
         indexes = indexes if indexes is not None else list(range(len(mean_densities)))
-        for index, mean_density in zip(indexes, mean_densities):
-            plt.plot(x_axis, mean_density, label="cryo-EM map density")
+        num_plot = int(len(indexes) / 3) + 1 if len(indexes) % 3 != 0 else int(len(indexes) / 3)
+        fig, ax = plt.subplots(num_plot, 3, figsize=(12, int(4 * num_plot)))
+        for times, data in enumerate(zip(indexes, mean_densities)):
+            index, mean_density = data
+            i = times // 3
+            j = times % 3
+            ax[i][j].plot(x_axis, mean_density, label="u")
             if estimated:
-                plt.plot(x_axis, estimated_mean_densities[index], "--", label="estimaed gaussian")
-                plt.plot(x_axis, (2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*x_axis**2)*A_B[0] + A_B[1], label="gaussian in qscore?")
-                plt.plot(x_axis, qscore_mean_densities[index], label="gaussian in qscore?")
-            plt.xlabel("Distance to the Center (Anstrom)")
-            plt.ylabel("Density")
-            plt.title(key)
-            if not compared:
-                plt.legend()
-                plt.show()
+                ax[i][j].plot(x_axis, estimated_mean_densities[index], "--", label="v")
+                # plt.plot(x_axis, (2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*x_axis**2)*A_B[0] + A_B[1], label="gaussian in qscore?")
+                # plt.plot(x_axis, qscore_mean_densities[index], label="gaussian in qscore?")
+                ax[i][j].set_title(key)
+                ax[i][j].text(0, 0, f"QEB = {round(qscores[index], 4)}",fontsize=14)
+                if not compared:
+                    ax[i][j].legend(loc="upper right")
+        plt.setp(ax[-1, :], xlabel="Distance to the Center (Anstrom)")
+        plt.setp(ax[:, 0], ylabel="Density")
         indexes = None
         plt.show()
