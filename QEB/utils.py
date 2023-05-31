@@ -150,12 +150,14 @@ def generate_grid_points(
     rads = np.round(np.arange(start_rad, max_rad, gap), 2)
     grid_points_chosen = {name: [] for name in df_processed["residue_name"].unique()}
     distances_to_center = {name: [] for name in df_processed["residue_name"].unique()}
-    for atomic_index in tqdm(range(len(df_processed))):
-    # for atomic_index in tqdm(range(100)):
+    Xs_tilde = {name: [] for name in df_processed["residue_name"].unique()}
+    # for atomic_index in tqdm(range(len(df_processed))):
+    for atomic_index in tqdm(range(150)):
         grid_points = {}
         name = df_processed.iloc[atomic_index, :]["residue_name"]
         all_distances_to_center = []
         all_grid_points = []
+        all_Xs_tilde = []
         for rad in rads:
             # The number of grid points we want to search depends on the dense of the ball
             num_points = int((rad**2 / start_rad**2) * base_num_points)
@@ -194,10 +196,12 @@ def generate_grid_points(
                     print("There are some grid points that could not be found.")
             all_distances_to_center.extend([rad] * len(grid_points))
             all_grid_points.extend(grid_points)
+            all_Xs_tilde.extend([[1, - 1 / 2 * rad ** 2]] * len(grid_points))
         grid_points_chosen[name].append(np.array(all_grid_points))
         distances_to_center[name].append(np.array(all_distances_to_center))
+        Xs_tilde[name].append(np.array(all_Xs_tilde))
     # grid_points_chosen = {name: np.array(points) for name, points in grid_points_chosen.items()}
-    return grid_points_chosen, distances_to_center
+    return grid_points_chosen, distances_to_center, Xs_tilde
 
 def interpolator(
         data: np.ndarray, 
@@ -232,8 +236,9 @@ def estimate_density(
         grid_points_chosen: Dict[str, List[np.ndarray]], 
         distances_to_center: Dict[str, List[np.ndarray]], 
         interp_func: callable, 
-        bayes_beta: Dict[str, float], 
-        estimated_A_ij_tilde: Dict[str, np.ndarray],
+        weighted_bayes_betas,
+        # bayes_beta: Dict[str, float], 
+        # estimated_A_ij_tilde: Dict[str, np.ndarray],
 ) -> Tuple[
         Dict[str, List[List[float]]], 
         Dict[str, List[List[float]]], 
@@ -268,15 +273,19 @@ def estimate_density(
         The dictionary of qscore mean densities for each grid point radius.
     """
     radius_density = {key: [] for key in grid_points_chosen.keys()}
-    estimated_radius_density = {key: [] for key in grid_points_chosen.keys()}
+    # estimated_radius_density = {key: [] for key in grid_points_chosen.keys()}
+    weighted_estimated_radius_density = {key: [] for key in grid_points_chosen.keys()}
     qscore_radius_density = {key: [] for key in grid_points_chosen.keys()}
     for key, value in grid_points_chosen.items():
         for i in range(len(value)):
             counter = Counter(distances_to_center[key][i])
             grid_points = grid_points_chosen[key][i]
-            A_ij_tilde = estimated_A_ij_tilde[key][i]
+            # A_ij_tilde = estimated_A_ij_tilde[key][i]
+            weighted_bayes_beta = weighted_bayes_betas[key][i]
+
             mean_densities = []
-            estimated_mean_densities = []
+            # estimated_mean_densities = []
+            weighted_estimated_mean_densities = []
             qscore_mean_densities = []
             start = 0
             densities = interp_func(grid_points)
@@ -287,20 +296,23 @@ def estimate_density(
             for distance, num in counter.items():
                 mean_densities.append(densities[start: start + num].mean())
                 X_k = - 1 / 2 * distance**2
-                estimated_mean_densities.append(np.exp(A_ij_tilde + X_k * bayes_beta[key]))
+                X_tilde = np.array([1, X_k])
+                weighted_estimated_mean_densities.append(np.exp(X_tilde.T @ weighted_bayes_beta))
+                # estimated_mean_densities.append(np.exp(A_ij_tilde + X_k * bayes_beta[key]))
                 qscore_mean_densities.append((2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*distance**2) * A + B)
                 start += num
             radius_density[key].append(mean_densities)
-            estimated_radius_density[key].append(estimated_mean_densities)
+            # estimated_radius_density[key].append(estimated_mean_densities)
+            weighted_estimated_radius_density[key].append(weighted_estimated_mean_densities)
             qscore_radius_density[key].append(qscore_mean_densities)
-    return radius_density, estimated_radius_density, qscore_radius_density
+    return radius_density, weighted_estimated_radius_density, qscore_radius_density
 
 def plot_density(
     radius_density: Dict[str, np.ndarray], 
     estimated_radius_density: Dict[str, np.ndarray],
     qscore_radius_density: Dict[str, np.ndarray],
-    A_B: Tuple[float, float],
-    qscores, 
+    # A_B: Tuple[float, float],
+    # qscores, 
     amino_acid: Optional[str] = None, 
     indexes: Optional[List[int]] = None, 
     start_rad: float = 0.01,
@@ -349,7 +361,7 @@ def plot_density(
     for key, mean_densities in radius_density.items():
         mean_densities = np.array(mean_densities)[indexes] if indexes is not None else mean_densities
         estimated_mean_densities = np.array(estimated_radius_density[key]) if indexes is not None else estimated_radius_density[key]
-        qscores = np.array(qscores[key]) if qscores is not None else qscores[key]
+        # qscores = np.array(qscores[key]) if qscores is not None else qscores[key]
 
         qscore_mean_densities = np.array(qscore_radius_density[key]) if indexes is not None else qscore_radius_density[key]
         indexes = indexes if indexes is not None else list(range(len(mean_densities)))
@@ -365,7 +377,7 @@ def plot_density(
                 # plt.plot(x_axis, (2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*x_axis**2)*A_B[0] + A_B[1], label="gaussian in qscore?")
                 # plt.plot(x_axis, qscore_mean_densities[index], label="gaussian in qscore?")
                 ax[i][j].set_title(key)
-                ax[i][j].text(0, 0, f"QEB = {round(qscores[index], 4)}",fontsize=14)
+                # ax[i][j].text(0, 0, f"QEB = {round(qscores[index], 4)}",fontsize=14)
                 if not compared:
                     ax[i][j].legend(loc="upper right")
         plt.setp(ax[-1, :], xlabel="Distance to the Center (Anstrom)")
