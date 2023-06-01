@@ -2,4 +2,6 @@ experiment
 *.ipynb_checkpoints
 *.pyc
 *dataset
+*document
 .DS_Store
+*.png
