@@ -3,3 +3,5 @@ experiment
 *.pyc
 *dataset
 .DS_Store
+*.png
+*.pdf
