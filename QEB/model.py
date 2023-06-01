@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import random
 from scipy.optimize import minimize
+from scipy.stats import norm
 from typing import List, Dict, Tuple, Optional
-from QEB.utils import *
+from .utils import *
 
 random.seed(0)
 np.random.seed(0)
@@ -128,9 +129,9 @@ class QEB:
 
     def caculate_constants(self) -> Tuple[Dict[str, np.ndarray]]:
         """
+        Estimate `beta_j` by OLS for the first iteration and replaced by bayes estimator for the rest of iteration.
         Estimate `A_ij_tilde` by simple linear regression solved by OLS.
-        Estimate `epsilon_ij` by MSE.
-        Caculate the constants of `B_j`, `C_j`, `D_j` `sigma_j_bar` before caculate log likelihood function.
+        Caculate the constants of `B_j`, `C_j`, and `D_j`before caculate log likelihood function.
 
         Params
         ----------
@@ -157,18 +158,33 @@ class QEB:
             B_j_list = []
             C_j_list = []
             D_j_list = []
+            beta_estimators_list = []
             data_log_arr = self.data_log[type_j]
-            center_distances_list = self.distances_to_center[type_j]
+            center_distances_arr = self.distances_to_center[type_j]
+            if None in self.beta_estimators.values():
+                flatten_data_log_arr = [
+                    item for sublist in data_log_arr for item in sublist
+                    ] if isinstance(data_log_arr[0], np.ndarray) else data_log_arr
+                flatten_center_distances_list = [
+                    item for sublist in center_distances_arr for item in sublist
+                    ] if isinstance(center_distances_arr[0], np.ndarray) else center_distances_arr
+                all_data_log = np.array(flatten_data_log_arr)
+                all_X_k = - 1 / 2 * np.array(flatten_center_distances_list)**2
+                cov = np.cov(all_X_k, all_data_log)[0, 1]
+                var = np.var(all_X_k)
+                beta_estimators = cov / var
+                self.beta_estimators[type_j] = beta_estimators
+            else:
+                beta_estimators = self.beta_estimators[type_j]
+
             for i in range(sample_size):
                 data_log = data_log_arr[i]
-                center_distances = center_distances_list[i]
+                center_distances = center_distances_arr[i]
                 X_k = - 1 / 2 * center_distances**2
-                cov = np.cov(X_k, data_log)[0, 1]
-                var = np.var(X_k)
-                beta_ols = cov / var
-                A_ij = data_log.mean() - beta_ols * X_k.mean()
-                variance = sum((data_log - (A_ij + X_k * beta_ols))
+                A_ij = data_log.mean() - beta_estimators * X_k.mean()
+                variance = sum((data_log - (A_ij + X_k * beta_estimators))
                                ** 2) / (data_log.shape[0] - 1)
+                beta_estimators_list.append(beta_estimators)
                 estimated_A_ij_tilde_list.append(A_ij)
                 estimated_variance.append(variance)
                 # Sum `k`
@@ -185,7 +201,7 @@ class QEB:
             self.C_j[type_j] = -sum(C_j_list)
             self.D_j[type_j] = -sum(D_j_list)
 
-        return self.estimated_A_ij_tilde, self.B_j, self.C_j, self.D_j
+        return self.beta_estimators, self.estimated_A_ij_tilde, self.B_j, self.C_j, self.D_j
 
     def negative_log_likelihood(
             self, params: Tuple[float]) -> float:
@@ -207,8 +223,11 @@ class QEB:
         C_j = np.array([value for value in self.C_j.values()])
         D_j = np.array([value for value in self.D_j.values()])
         E_j = 1 - 2 * sigma_0 * D_j
+        mu_tilde = (mu_0 + sigma_0 * C_j) / E_j
+        sigma_tilde = sigma_0/ (1 - 2 * sigma_0 * D_j)
+        truncated = (1 - norm.cdf(-mu_tilde / sigma_tilde)) - (1 - norm.cdf(mu_0 / sigma_0))
         return -sum(-1 / 2 * (np.log(E_j)) - (sigma_0 * (4 * B_j * \
-                    D_j - C_j**2) - 2 * mu_0 * C_j - 2 * B_j - 2 * mu_0**2 * D_j) / (2 * E_j))
+                    D_j - C_j**2) - 2 * mu_0 * C_j - 2 * B_j - 2 * mu_0**2 * D_j) / (2 * E_j) + truncated)
 
     def estimate_hyperparameters_by_mle(self) -> Tuple[float]:
         """
@@ -224,27 +243,51 @@ class QEB:
             The estimators of `mu_0` and `sigma_0`
         """
         self.res = minimize(self.negative_log_likelihood,
-                            (2, 0.5), method='Nelder-Mead', bounds=((None, None), (0, None)))
+                            (2, 0.5), method='Nelder-Mead', bounds=((None, None), (1e-20, None)))
         self.mu_0_hat, self.sigma_0_hat = self.res.x
         return self.mu_0_hat, self.sigma_0_hat
 
-    def estimate_beta_1j_by_Bayse(self) -> Dict[str, np.ndarray]:
+    def estimate_beta_j_by_Bayse(
+            self,
+            iteration: int = 30, 
+            tolerate: float = 0.000001
+    ) -> Dict[str, np.ndarray]:
         """
-        Estimate `beta_1j` by bayes' estimator.
+        Estimate `beta_j` by bayes' estimator.
+
+        Params
+        ----------
+        iteration: int
+            The number of how many times we want to iterate
+        tolerate: float
+            The minimal error that we can tolerate
 
         Return
         ----------
         Dict[str, np.ndarray]
-            The bayes estimators of `beta_1j`
+            The bayes estimators of `beta_j`
         """
-        C_j = np.array([value for value in self.C_j.values()])
-        D_j = np.array([value for value in self.D_j.values()])
-        E_j = 1 - 2 * self.sigma_0_hat * D_j
-        beta_1j_hat = (self.mu_0_hat + self.sigma_0_hat * C_j) / E_j
-        self.beta_1j_hat = {
-            key: value for key, value in zip(
-                self.C_j.keys(), beta_1j_hat)}
-        return self.beta_1j_hat
+
+        self.beta_estimators = {key: None for key in self.numbers_of_each_type.keys()}
+        mse_list = []
+        for _ in range(iteration):
+            self.caculate_constants()
+            self.estimate_hyperparameters_by_mle()
+            beta_j_hat_last = np.array([value for value in self.beta_estimators.values()])
+            C_j = np.array([value for value in self.C_j.values()])
+            D_j = np.array([value for value in self.D_j.values()])
+            E_j = 1 - 2 * self.sigma_0_hat * D_j
+            mu_tilde = (self.mu_0_hat + self.sigma_0_hat * C_j) / E_j
+            sigma_tilde = self.sigma_0_hat / (1 - 2 * self.sigma_0_hat * D_j)
+            a = -mu_tilde / np.sqrt(sigma_tilde)
+            beta_j_hat = mu_tilde + norm.pdf(a) / (1 - norm.cdf(a)) * np.sqrt(sigma_tilde)
+            mse = sum((beta_j_hat_last - beta_j_hat)**2)
+            self.beta_estimators = {name: beta for name, beta in zip(self.beta_estimators, beta_j_hat)}
+            mse_list.append(mse)
+            if mse < tolerate:
+                break
+        self.beta_j_hat = {key: value for key, value in zip(self.C_j.keys(), beta_j_hat)}
+        return self.beta_j_hat, mse_list
 
     def calculate_qeb_score(self) -> Dict[str, List[float]]:
         """
@@ -261,8 +304,8 @@ class QEB:
             # Calculate estimated densities from empirical baysian model
             X_k = - 1 / 2 * np.array(self.distances_to_center[amino_acid])**2
             A_ij_tilde = self.estimated_A_ij_tilde[amino_acid].reshape(-1, 1)
-            beta_1j = self.beta_1j_hat[amino_acid].reshape(-1, 1)
-            estimated_densities = np.exp(A_ij_tilde + X_k * beta_1j)
+            beta_j = self.beta_j_hat[amino_acid].reshape(-1, 1)
+            estimated_densities = np.exp(A_ij_tilde + X_k * beta_j)
             self.estimated_data[amino_acid] = estimated_densities
             for num in range(estimated_densities.shape[0]):
                 # Get density and estimated_density at current index
@@ -310,6 +353,6 @@ class QEB:
         None
         """
         self.radius_density, self.estimated_radius_density, self.qscore_radius_density = estimate_density(
-            self.grid_points, self.distances_to_center, self.interp_func, self.beta_1j_hat, self.estimated_A_ij_tilde)
+            self.grid_points, self.distances_to_center, self.interp_func, self.beta_j_hat, self.estimated_A_ij_tilde)
         plot_density(self.radius_density, self.estimated_radius_density, self.qscore_radius_density, self.A_B ,
-                     amino_acid, indexes, start_rad, max_rad, gap, compared, estimated)
+                     self.qeb_score, amino_acid, indexes, start_rad, max_rad, gap, compared, estimated)
