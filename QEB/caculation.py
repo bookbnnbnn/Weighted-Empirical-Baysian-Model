@@ -188,10 +188,7 @@ def empirical_bayes_single(mu_tilde_all, as_tilde_all, bs_tilde_all):
 def weight(weight_matrix_all, X_tilde_all, y_tilde_all, betas_em, sigmas_em, alpha):
     for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, betas_em, sigmas_em)):
         X_tilde, y_tilde, beta_em, sigma_em = elements
-        coeff = ((1 + alpha) / ((2 * np.pi )**(alpha / 2) * sigma_em**(alpha / 2 + 1)))
+        coeff = ((1 + alpha) / ((2 * np.pi)**(alpha / 2) * sigma_em**(alpha / 2 + 1)))
         exponential = np.exp(-(alpha / (2 * sigma_em)) * (y_tilde - X_tilde @ beta_em)**2)
         weight_matrix_all[idx] = np.diag(coeff * exponential)
     return weight_matrix_all
-
-
-
