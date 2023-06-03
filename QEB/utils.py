@@ -72,7 +72,7 @@ def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
         return df_processed
     else:
         return df
-
+    
 def generate_points_on_sphere(
         radius: float = 1, 
         num_points: int = 8, 
@@ -109,8 +109,10 @@ def generate_points_on_sphere(
     points = np.column_stack((center_x + radius*x, center_y + radius*y, center_z + radius*z))
     return points 
 
+
 def generate_grid_points(
-        df_processed: pd.DataFrame,
+        atom_points,
+        residue_names,
         start_rad: float = 0.01,
         max_rad: float = 1.5,
         gap: float= 0.01,
@@ -145,16 +147,15 @@ def generate_grid_points(
     distances_to_center: Dict[str, List[np.ndarray]]
         The distances(radius) of grid points to center respectively
     """
-    atom_points = np.column_stack(
-        (df_processed.x_coord, df_processed.y_coord, df_processed.z_coord))
     rads = np.round(np.arange(start_rad, max_rad, gap), 2)
-    grid_points_chosen = {name: [] for name in df_processed["residue_name"].unique()}
-    distances_to_center = {name: [] for name in df_processed["residue_name"].unique()}
-    Xs_tilde = {name: [] for name in df_processed["residue_name"].unique()}
-    # for atomic_index in tqdm(range(len(df_processed))):
-    for atomic_index in tqdm(range(150)):
+    unique_residue = np.unique(residue_names)
+    grid_points_chosen = {name: [] for name in unique_residue}
+    distances_to_center = {name: [] for name in unique_residue}
+    Xs_tilde = {name: [] for name in unique_residue}
+    
+    for atomic_index in tqdm(range(residue_names.shape[0])):
         grid_points = {}
-        name = df_processed.iloc[atomic_index, :]["residue_name"]
+        name = residue_names[atomic_index]
         all_distances_to_center = []
         all_grid_points = []
         all_Xs_tilde = []
@@ -173,12 +174,11 @@ def generate_grid_points(
                     rad, num_candidate, *atom_point)
                 # Check the cloest atomic of the grid point is the atomic we want
                 for candidate_point in candidate_points:
-                    distances = ((candidate_point - atom_points)
-                                 ** 2).sum(axis=1)
+                    distances = ((candidate_point - atom_points) ** 2).sum(axis=1)
                     if (distances[atomic_index] == distances.min()) and (num_chosen < num_points):
-                        grid_points_candidate[num_chosen] = candidate_point.tolist(
-                        )
+                        grid_points_candidate[num_chosen] = candidate_point.tolist()
                         num_chosen += 1
+
                 if isinstance(grid_points_candidate[-1], type(None)):
                     # If the number of `None` is less than before than save it
                     if grid_points.count(None) > grid_points_candidate.count(None):
@@ -283,7 +283,6 @@ def estimate_density_new(
             densities = data[key][i]
             # A_ij_tilde = estimated_A_ij_tilde[key][i]
             weighted_bayes_beta = weighted_bayes_betas[key][i]
-
             mean_densities = []
             # estimated_mean_densities = []
             weighted_estimated_mean_densities = []
