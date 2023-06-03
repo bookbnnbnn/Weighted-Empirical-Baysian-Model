@@ -31,7 +31,7 @@ class WQEB:
         self.sigma_matrixs = {group_name[idx]: val for idx, val in enumerate(sigma_matrixs)}
 
         self.vs = {group_name[idx]: val for idx, val in enumerate([400] * group_num)}
-        self.ss = {group_name[idx]: val for idx, val in enumerate([0.0001] * group_num)}
+        self.ss = {group_name[idx]: val for idx, val in enumerate([0.001] * group_num)}
 
         # grid points
         distances_to_center = np.repeat(np.arange(0.01, 0.5, 0.01), 10)
@@ -39,7 +39,7 @@ class WQEB:
         X_tilde = [[np.concatenate((np.ones((grid_num, 1)), (-1/ 2 * distances_to_center ** 2).reshape(-1, 1)), axis=1).tolist()] * in_group_num]
         self.distances_to_center = {group_name[idx]: val for idx, val in enumerate(np.array([[distances_to_center]* in_group_num] * group_num))}
         self.Xs_tilde = {group_name[idx]: val for idx, val in enumerate(np.array(X_tilde * group_num))}
-        self.lambda_matrixs = {group_name[idx]: val for idx, val in enumerate([np.eye(2)] * group_num)}
+        self.lambdas = {group_name[idx]: val for idx, val in enumerate([np.ones(in_group_num)] * group_num)}
         self.weight_matrixs = {group_name[idx]: val for idx, val in enumerate(np.array([[np.eye(grid_num)] * in_group_num] * group_num))}
 
         # prior
@@ -49,14 +49,15 @@ class WQEB:
         self.sigmas = {group_name[idx]: val for idx, val in enumerate(np.array(sigmas))}
 
         betas = []
-        for mu, sigma_all, sigma_matrix, lambda_matrix in \
-            zip(self.mus.values(), self.sigmas.values(), self.sigma_matrixs.values(), self.lambda_matrixs.values()):
+        for mu, sigma_all, sigma_matrix, lambda_all in \
+            zip(self.mus.values(), self.sigmas.values(), self.sigma_matrixs.values(), self.lambdas.values()):
             beta = []
-            for sigma in sigma_all:
-                beta.append(multivariate_normal.rvs(mu, sigma * np.linalg.inv(lambda_matrix) @ np.linalg.inv(sigma_matrix)))
+            for sigma, lambda_ in zip(sigma_all, lambda_all):
+                beta.append(multivariate_normal.rvs(mu, sigma * lambda_ ** (-1) * np.linalg.inv(sigma_matrix)))
+            beta[-1] = [10, 10]
             betas.append(np.array(beta))
-        self.betas = {group_name[idx]: val for idx, val in enumerate(betas)}
 
+        self.betas = {group_name[idx]: val for idx, val in enumerate(betas)}
         # data
         ys_tilde = []
         ys_tilde_clean = []
@@ -67,7 +68,8 @@ class WQEB:
             for beta, sigma, weight_matrix, X_tilde in zip(beta_all, sigma_all, weight_matrix_all, X_tilde_all):
                 data = multivariate_normal.rvs(X_tilde @ beta, sigma * weight_matrix)
                 index = np.random.choice(np.arange(0, grid_num), int(grid_num * contained_ratio), replace=False)
-                data[index] += np.random.uniform(0.5, 1, size=len(index))
+                # data[index] += np.random.uniform(0.5, 1, size=len(index))
+                data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([0.5, -3]), 0.05 * weight_matrix[index, index])
                 y_tilde.append(data)
                 clean_data = copy(data)
                 clean_data[index] = np.nan
@@ -77,7 +79,7 @@ class WQEB:
         self.data_log = {group_name[idx]: val for idx, val in enumerate(ys_tilde)}
         self.data = {group_name[idx]: np.exp(val) for idx, val in enumerate(ys_tilde_clean)}
         return self.data_log
-
+    
     def read_data(
             self,
             root_map: str,
@@ -124,8 +126,10 @@ class WQEB:
         mean, std = np.mean(data), np.std(data)
         self.A_B = mean + 10 * std, mean - std
         df_processed = read_pdb(root_pdb, atomic=atomic)
+        residue_names = np.array(df_processed["residue_name"])
+        atom_points = np.column_stack((df_processed.x_coord, df_processed.y_coord, df_processed.z_coord))
         self.grid_points, self.distances_to_center, self.Xs_tilde = generate_grid_points(
-            df_processed, start_rad, max_rad, gap, max_points, base_num_points, max_iter)
+            atom_points, residue_names, start_rad, max_rad, gap, max_points, base_num_points, max_iter)
         self.interp_func = interpolator(data, grid_size, origin)
         self.data = {key: self.interp_func(grid_points) for key, grid_points in self.grid_points.items()}
         self.data_log = {key: np.log(value + 1e-35) for key, value in self.data.items()}
@@ -160,13 +164,13 @@ class WQEB:
             for X_tilde in self.Xs_tilde[name]:
                 weight_matrix_new.append(np.eye(len(X_tilde)))
             self.weight_matrixs[name] = np.array(weight_matrix_new)
-        self.lambda_matrixs = {name: np.eye(2) for name in self.Xs_tilde}
+        self.lambdas = {name: np.ones(len(self.Xs_tilde[name])) for name in self.Xs_tilde}
         
-        return self.mus_initial, self.sigma_matrixs_initial, self.vs_initial, self.ss_initial, self.weight_matrixs, self.lambda_matrixs
+        return self.mus_initial, self.sigma_matrixs_initial, self.vs_initial, self.ss_initial, self.weight_matrixs, self.lambdas
 
     def algorithm_iter(self, iter_num = 5, alpha = 0.1):
         mus_tilde, mus_mle, sigma_matrixs_tilde, as_tilde, bs_tilde = caculate_mu_mle(
-            self.Xs_tilde, self.data_log, self.weight_matrixs, self.lambda_matrixs, \
+            self.Xs_tilde, self.data_log, self.weight_matrixs, self.lambdas, \
                 self.sigma_matrixs_initial, self.mus_initial, self.vs_initial, self.ss_initial
                 )
         self.betas_em = {}
@@ -182,7 +186,7 @@ class WQEB:
             sigma_matrix = np.eye(2)
             for i in range(iter_num):
                 objective_func = lambda params: estimator_negative_log_likelihood(        
-                params, self.Xs_tilde, self.data_log, self.lambda_matrixs, self.weight_matrixs, mus_mle, name
+                params, self.Xs_tilde, self.data_log, self.lambdas, self.weight_matrixs, mus_mle, name
                 )
 
                 bs_tilde_all = bs_tilde
@@ -192,14 +196,9 @@ class WQEB:
                     return sum(v / 2 * (1 / s - (grid_num + v) / (v * s + 2 * (bs_tilde_all[name] - v * s / 2)))), \
                         sum(1 / 2 * np.log(v * s / 2) + 1 / 2 - digamma(v / 2) + digamma((v + grid_num) / 2) - \
                             1 / 2 * np.log(bs_tilde_all[name]) + (grid_num + v) / 4 * s / bs_tilde_all[name])
-                
                 # result = fsolve(gradient, [500, 1])
 
-
-                # res = minimize(objective_func, (1, 1, 1, 1), method='L-BFGS-B', bounds=((0.1, None), (0.1, None), (0, None), (0, None)))
-                res = minimize(objective_func, (1, 1), method='L-BFGS-B', bounds=((0, None), (0, None)), jac=gradient)
-
-                # sigma_matrix = np.diag((res.x[:2]))
+                res = minimize(objective_func, (0.1, 0.1), method='L-BFGS-B', bounds=((0, None), (0, None)))
                 v = res.x[0]
                 s = res.x[1]
                 logging.info("[Minimize res] " + "v: " + str(v) + " s: " + str(s))
@@ -207,16 +206,16 @@ class WQEB:
                 ss.append(s)
                 
                 mu_tilde_all, mu_mle, sigma_matrixs_tilde_all, as_tilde_all, bs_tilde_all = caculate_mu_mle_single(
-                    self.Xs_tilde[name], self.data_log[name], self.weight_matrixs[name], self.lambda_matrixs[name], \
+                    self.Xs_tilde[name], self.data_log[name], self.weight_matrixs[name], self.lambdas[name], \
                         sigma_matrix, self.mus_initial[name], v, s, name
                     )
                 betas_em, sigmas_em = empirical_bayes_single(mu_tilde_all, as_tilde_all, bs_tilde_all)
-                sigma_matrix = (betas_em - betas_em.mean()).T @ (betas_em - betas_em.mean())
-                print(np.all(np.linalg.eigvals(sigma_matrix) > 0))
-                print(sigma_matrix)
+                # print(np.all(np.linalg.eigvals(sigma_matrix) > 0))
+
                 # loss.append(sum((mu_mle[name] - mus[name]) ** 2))
-                weight(self.weight_matrixs[name], self.Xs_tilde[name], self.data_log[name], betas_em, sigmas_em, alpha)
-                
+                self.weight_matrixs[name] = caculate_weight_matrix(self.Xs_tilde[name], self.data_log[name], betas_em, sigmas_em, alpha)
+                self.lambdas[name] = caculate_lambdas(mu_mle[name], sigma_matrix, betas_em, sigmas_em, alpha)
+            
                 # print(mu_mle)
                 # print(sigma_matrix)
                 # print(v)
@@ -429,8 +428,7 @@ class WQEB:
         """
         # self.radius_density, self.estimated_radius_density, self.weighted_estimated_radius_density, self.qscore_radius_density = estimate_density(
         #     self.data, self.Xs_tilde, self.betas_em, self.beta_j_hat, self.estimated_A_ij_tilde)
-        # plot_density(self.radius_density, self.estimated_radius_density, self.weighted_estimated_radius_density, 
-        #              self.qscore_radius_density, amino_acid, indexes, start_rad, max_rad, gap, compared, estimated)
+        # plot_density(self.radius_density, self.estimated_radius_density, self.weighted_estimated_radius_density, self.qscore_radius_density, amino_acid, indexes, start_rad, max_rad, gap, compared, estimated)
         
         self.radius_density, self.weighted_estimated_radius_density, self.qscore_radius_density = estimate_density_new(self.data, self.Xs_tilde, self.betas_em)
         plot_density(self.radius_density, self.weighted_estimated_radius_density, 
