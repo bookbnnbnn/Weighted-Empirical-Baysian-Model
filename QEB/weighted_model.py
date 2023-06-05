@@ -169,7 +169,7 @@ class WQEB:
         return self.mus_initial, self.sigma_matrixs_initial, self.vs_initial, self.ss_initial, self.weight_matrixs, self.lambdas
 
     def algorithm_iter(self, iter_num = 5, alpha = 0.1):
-        mus_tilde, mus_mle, sigma_matrixs_tilde, as_tilde, bs_tilde = caculate_mu_mle(
+        mus_tilde, sigma_matrixs_tilde, as_tilde, bs_tilde = caculate_tilde(
             self.Xs_tilde, self.data_log, self.weight_matrixs, self.lambdas, \
                 self.sigma_matrixs_initial, self.mus_initial, self.vs_initial, self.ss_initial
                 )
@@ -186,44 +186,56 @@ class WQEB:
             sigma_matrix = np.eye(2)
             for i in range(iter_num):
                 objective_func = lambda params: estimator_negative_log_likelihood(        
-                params, self.Xs_tilde, self.data_log, self.lambdas, self.weight_matrixs, mus_mle, name
+                params, self.Xs_tilde, self.data_log, self.lambdas, self.weight_matrixs, name
                 )
 
                 bs_tilde_all = bs_tilde
+                as_tilde_all = as_tilde
                 grid_num = len(self.Xs_tilde[name][0])
                 def gradient(params):
                     v, s = params[0], params[1]
-                    return sum(v / 2 * (1 / s - (grid_num + v) / (v * s + 2 * (bs_tilde_all[name] - v * s / 2)))), \
+                    mu = np.array([params[2], params[3]])
+                    X_tilde_all = self.Xs_tilde[name]
+                    y_tilde_all = self.data_log[name]
+                    weight_matrix_all = self.weight_matrixs[name]
+                    lambdas = self.lambdas[name]
+                    a_tilde_all = as_tilde_all[name]
+                    b_tilde_all = bs_tilde_all[name]
+                    weight_list = []
+                    for X_tilde, y_tilde, weight_matrix, lambda_, a_tilde, b_tilde in zip(X_tilde_all, y_tilde_all, weight_matrix_all, lambdas, a_tilde_all, b_tilde_all):
+                        A = np.linalg.inv(X_tilde.T @ weight_matrix @ X_tilde + lambda_ * sigma_matrix)
+                        weight = a_tilde / b_tilde * lambda_ * sigma_matrix @ A @ X_tilde.T @ weight_matrix @ y_tilde
+                        inverse_weight = a_tilde / b_tilde * lambda_ * sigma_matrix @ (np.eye(2) - lambda_ * A @ sigma_matrix) @ mu
+                        weight_list.append(inverse_weight - weight)
+                    print((weight_list))
+                    print(sum(weight_list))
+                    return sum(v / 2 * (1 / s - (grid_num + v) / (v * s + 2 * (b_tilde_all - v * s / 2)))), \
                         sum(1 / 2 * np.log(v * s / 2) + 1 / 2 - digamma(v / 2) + digamma((v + grid_num) / 2) - \
-                            1 / 2 * np.log(bs_tilde_all[name]) + (grid_num + v) / 4 * s / bs_tilde_all[name])
+                            1 / 2 * np.log(b_tilde_all) + (grid_num + v) / 4 * s / b_tilde_all), \
+                        sum(weight_list)[0], sum(weight_list)[1]
+                            
                 # result = fsolve(gradient, [500, 1])
 
-                res = minimize(objective_func, (0.1, 0.1), method='L-BFGS-B', bounds=((0, None), (0, None)))
-                v = res.x[0]
-                s = res.x[1]
-                logging.info("[Minimize res] " + "v: " + str(v) + " s: " + str(s))
+                res = minimize(objective_func, (0.1, 0.1, 0.1, 0.1), method='L-BFGS-B', bounds=((0.001, None), (0.001, None), (0.001, None), (0.001, None)), jac=gradient)
+                v = 1
+                s = 1
+                mu_mle = np.array([res.x[2], res.x[3]])
+                logging.info("[Minimize res] " + "v: " + str(v) + " s: " + str(s) + " mu: " + str(mu_mle))
                 vs.append(v)
                 ss.append(s)
                 
-                mu_tilde_all, mu_mle, sigma_matrixs_tilde_all, as_tilde_all, bs_tilde_all = caculate_mu_mle_single(
+                mu_tilde_all, sigma_matrixs_tilde_all, as_tilde_all, bs_tilde_all = caculate_tilde_single(
                     self.Xs_tilde[name], self.data_log[name], self.weight_matrixs[name], self.lambdas[name], \
                         sigma_matrix, self.mus_initial[name], v, s, name
                     )
                 betas_em, sigmas_em = empirical_bayes_single(mu_tilde_all, as_tilde_all, bs_tilde_all)
-                # print(np.all(np.linalg.eigvals(sigma_matrix) > 0))
-
-                # loss.append(sum((mu_mle[name] - mus[name]) ** 2))
+                logging.info("[Empirical Bayes] " + "betas_em: " + str(betas_em) + " sigmas_em: " + str(sigmas_em))
                 self.weight_matrixs[name] = caculate_weight_matrix(self.Xs_tilde[name], self.data_log[name], betas_em, sigmas_em, alpha)
-                self.lambdas[name] = caculate_lambdas(mu_mle[name], sigma_matrix, betas_em, sigmas_em, alpha)
+                self.lambdas[name] = caculate_lambdas(mu_mle, sigma_matrix, betas_em, sigmas_em, alpha)
             
-                # print(mu_mle)
-                # print(sigma_matrix)
-                # print(v)
-                # print(s)
-                # print("-"*10)
             self.betas_em[name] = betas_em
             self.sigmas_em[name] = sigmas_em
-            self.mus_mle.update(mu_mle)
+            self.mus_mle[name] = mu_mle
             self.vs_mle[name] = vs
             self.ss_mle[name] = ss
 
