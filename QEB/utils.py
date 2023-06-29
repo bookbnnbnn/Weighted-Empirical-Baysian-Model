@@ -10,6 +10,8 @@ from itertools import filterfalse
 from scipy.stats import norm
 from collections import Counter
 from typing import List, Dict, Tuple, Optional
+from numba import njit
+import random
 
 
 def read_map(root: str) -> Tuple[np.ndarray]:
@@ -154,6 +156,75 @@ def generate_grid_points(
     Xs_tilde = {name: [] for name in unique_residue}
     
     for atomic_index in tqdm(range(residue_names.shape[0])):
+    # for atomic_index in tqdm(range(2000)):
+        grid_points = {}
+        name = residue_names[atomic_index]
+        all_distances_to_center = []
+        all_grid_points = []
+        all_Xs_tilde = []
+        for rad in rads:
+            # The number of grid points we want to search depends on the dense of the ball
+            num_points = int((rad**2 / start_rad**2) * base_num_points)
+            num_candidate = num_points if num_points < max_points else max_points
+            atom_point = atom_points[atomic_index].reshape(-1)
+            # Search grid points for `MAX_ITER` otherwise give up
+
+            grid_points = generate_points_on_sphere(rad, num_candidate, *atom_point)
+            all_distances_to_center.extend([rad] * len(grid_points))
+            all_grid_points.extend(grid_points.tolist())
+            all_Xs_tilde.extend([[1, - 1 / 2 * rad ** 2]] * len(grid_points))
+        grid_points_chosen[name].append(np.array(all_grid_points))
+        distances_to_center[name].append(np.array(all_distances_to_center))
+        Xs_tilde[name].append(np.array(all_Xs_tilde))
+    
+    return grid_points_chosen, distances_to_center, Xs_tilde
+
+
+def generate_grid_points2(
+        atom_points,
+        residue_names,
+        start_rad: float = 0.01,
+        max_rad: float = 1.5,
+        gap: float= 0.01,
+        max_points: int = 8,
+        base_num_points: int = 4,
+        max_iter: int = 30
+) -> Tuple[Dict[str, List[np.ndarray]]]:
+    """
+    Generate grid points from each center that we chose from atomic model
+
+    Params
+    ----------
+    df_processed: pd.DataFrame
+        The processed dataframe 
+    start_rad: float (default=0.01)
+            Minimum radius for generating grid points. 
+    max_rad: float (default=0.8)
+        Maximum radius for generating grid points. 
+    gap: float (default=0.01)
+        Gap between radii for generating grid points. 
+    max_points: int (default=8)
+        Maximum number of points to generate at each radius. 
+    base_num_points: int (default=4)
+        Number of points to generate at the minimum radius. 
+    max_iter: int (default=30)
+        The maximal iteration that we want to find the grid points
+
+    Return
+    ----------
+    grid_points_chosen: Dict[str, List[np.ndarray]]
+        The generated grid points
+    distances_to_center: Dict[str, List[np.ndarray]]
+        The distances(radius) of grid points to center respectively
+    """
+    rads = np.round(np.arange(start_rad, max_rad, gap), 2)
+    unique_residue = np.unique(residue_names)
+    grid_points_chosen = {name: [] for name in unique_residue}
+    distances_to_center = {name: [] for name in unique_residue}
+    Xs_tilde = {name: [] for name in unique_residue}
+    
+    # for atomic_index in tqdm(range(residue_names.shape[0])):
+    for atomic_index in tqdm(range(500)):
         grid_points = {}
         name = residue_names[atomic_index]
         all_distances_to_center = []
@@ -232,238 +303,100 @@ def interpolator(
     interp_func = RegularGridInterpolator((x, y, z), data)
     return interp_func
 
-def estimate_density_new(
-        data, 
-        Xs_tilde: Dict[str, List[np.ndarray]], 
-        # distances_to_center: Dict[str, List[np.ndarray]], 
-        # interp_func: callable, 
-        weighted_bayes_betas,
-        # bayes_beta: Dict[str, float], 
-        # estimated_A_ij_tilde: Dict[str, np.ndarray],
+
+def density_mean(
+        data_list, 
+        distances_to_center: Dict[str, List[np.ndarray]], 
 ) -> Tuple[
         Dict[str, List[List[float]]], 
-        Dict[str, List[List[float]]], 
-        Dict[str, List[List[float]]]
 ]:
-    """
-    Given the interpolation function from the density map, construct the 
-    densities on the atomic model corresponding to their coordinates. 
-    
-    Params
-    ----------
-    grid_points_chosen: 
-        The dictionary of grid points chosen for each radius.
-    distances_to_center: 
-        The dictionary of distances to the center for each radius.
-    interp_func: 
-        The callable interpolation function.
-    bayes_beta: 
-        The dictionary of Bayesian beta values for each radius.
-    estimated_A_ij_tilde: 
-        The dictionary of estimated values of A_ij_tilde for each radius.
-    estimated_means_of_error: 
-        The dictionary of estimated means of error for each radius.
-    
-    Return
-    ----------
-    radius_density: 
-        The dictionary of mean densities for each grid point radius.
-    estimated_radius_density: 
-        The dictionary of estimated mean densities for each grid point radius.
-    qscore_radius_density: 
-        The dictionary of qscore mean densities for each grid point radius.
-    """
-    radius_density = {key: [] for key in Xs_tilde.keys()}
-    # estimated_radius_density = {key: [] for key in Xs_tilde.keys()}
-    weighted_estimated_radius_density = {key: [] for key in Xs_tilde.keys()}
-    qscore_radius_density = {key: [] for key in Xs_tilde.keys()}
-    for key, value in Xs_tilde.items():
-        for i in range(len(value)):
-            counter = Counter(Xs_tilde[key][i][:, 1])
-            densities = data[key][i]
-            # A_ij_tilde = estimated_A_ij_tilde[key][i]
-            weighted_bayes_beta = weighted_bayes_betas[key][i]
-            mean_densities = []
-            # estimated_mean_densities = []
-            weighted_estimated_mean_densities = []
-            qscore_mean_densities = []
-            start = 0
-            m = densities.mean()
-            std = densities.std()
-            A = m + 10 * std
-            B = m - std
-            for X_k, num in counter.items():
-                densities_chosen = densities[start: start + num]
-                densities_chosen = densities_chosen[~np.isnan(densities_chosen)]
-                mean_densities.append(densities_chosen.mean())
-                distance_to_center = np.sqrt(-2 * X_k)
-                X_tilde = np.array([1, X_k])
-                weighted_estimated_mean_densities.append(np.exp(X_tilde.T @ weighted_bayes_beta))
-                # estimated_mean_densities.append(np.exp(A_ij_tilde + X_k * bayes_beta[key]))
-                qscore_mean_densities.append((2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*distance_to_center**2) * A + B)
-                start += num
-            radius_density[key].append(mean_densities)
-            # estimated_radius_density[key].append(estimated_mean_densities)
-            weighted_estimated_radius_density[key].append(weighted_estimated_mean_densities)
-            qscore_radius_density[key].append(qscore_mean_densities)
-    return radius_density, weighted_estimated_radius_density, qscore_radius_density
-
-def estimate_density(
-        data, 
-        Xs_tilde: Dict[str, List[np.ndarray]], 
-        # distances_to_center: Dict[str, List[np.ndarray]], 
-        # interp_func: callable, 
-        weighted_bayes_betas,
-        bayes_beta: Dict[str, float], 
-        estimated_A_ij_tilde: Dict[str, np.ndarray],
-) -> Tuple[
-        Dict[str, List[List[float]]], 
-        Dict[str, List[List[float]]], 
-        Dict[str, List[List[float]]]
-]:
-    """
-    Given the interpolation function from the density map, construct the 
-    densities on the atomic model corresponding to their coordinates. 
-    
-    Params
-    ----------
-    grid_points_chosen: 
-        The dictionary of grid points chosen for each radius.
-    distances_to_center: 
-        The dictionary of distances to the center for each radius.
-    interp_func: 
-        The callable interpolation function.
-    bayes_beta: 
-        The dictionary of Bayesian beta values for each radius.
-    estimated_A_ij_tilde: 
-        The dictionary of estimated values of A_ij_tilde for each radius.
-    estimated_means_of_error: 
-        The dictionary of estimated means of error for each radius.
-    
-    Return
-    ----------
-    radius_density: 
-        The dictionary of mean densities for each grid point radius.
-    estimated_radius_density: 
-        The dictionary of estimated mean densities for each grid point radius.
-    qscore_radius_density: 
-        The dictionary of qscore mean densities for each grid point radius.
-    """
-    radius_density = {key: [] for key in Xs_tilde.keys()}
-    estimated_radius_density = {key: [] for key in Xs_tilde.keys()}
-    weighted_estimated_radius_density = {key: [] for key in Xs_tilde.keys()}
-    qscore_radius_density = {key: [] for key in Xs_tilde.keys()}
-    for key, value in Xs_tilde.items():
-        for i in range(len(value)):
-            counter = Counter(Xs_tilde[key][i][:, 1])
-            densities = data[key][i]
-            A_ij_tilde = estimated_A_ij_tilde[key][i]
-            weighted_bayes_beta = weighted_bayes_betas[key][i]
-
-            mean_densities = []
-            estimated_mean_densities = []
-            weighted_estimated_mean_densities = []
-            qscore_mean_densities = []
-            start = 0
-            m = densities.mean()
-            std = densities.std()
-            A = m + 10 * std
-            B = m - std
-            for X_k, num in counter.items():
-                densities_chosen = densities[start: start + num]
-                densities_chosen = densities_chosen[~np.isnan(densities_chosen)]
-                mean_densities.append(densities_chosen.mean())
-                distance_to_center = np.sqrt(-2 * X_k)
-                X_tilde = np.array([1, X_k])
-                weighted_estimated_mean_densities.append(np.exp(X_tilde.T @ weighted_bayes_beta))
-                estimated_mean_densities.append(np.exp(A_ij_tilde + X_k * bayes_beta[key]))
-                qscore_mean_densities.append((2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*distance_to_center**2) * A + B)
-                start += num
-            radius_density[key].append(mean_densities)
-            estimated_radius_density[key].append(estimated_mean_densities)
-            weighted_estimated_radius_density[key].append(weighted_estimated_mean_densities)
-            qscore_radius_density[key].append(qscore_mean_densities)
-    return radius_density, estimated_radius_density, weighted_estimated_radius_density, qscore_radius_density
+    radius_densities = []
+    for data in data_list:
+        radius_density = {key: [] for key in distances_to_center.keys()}
+        for key, value in distances_to_center.items():
+            for i in range(len(value)):
+                mean_densities = []
+                counter = Counter(distances_to_center[key][i])
+                densities = data[key][i]
+                start = 0
+                for distance, num in counter.items():
+                    densities_chosen = densities[start: start + num]
+                    if np.isnan(densities_chosen).any():
+                        densities_chosen = densities_chosen[~np.isnan(densities_chosen)]
+                    mean_densities.append(densities_chosen.mean())
+                    start += num
+                radius_density[key].append(np.array(mean_densities))
+            radius_density[key] = np.array(radius_density[key])
+        radius_densities.append(radius_density)
+    return radius_densities
 
 def plot_density(
-    radius_density: Dict[str, np.ndarray], 
-    # estimated_radius_density: Dict[str, np.ndarray],
-    weighted_estimated_radius_density,
-    qscore_radius_density: Dict[str, np.ndarray],
-    # A_B: Tuple[float, float],
-    # qscores, 
-    amino_acid: Optional[str] = None, 
-    indexes: Optional[List[int]] = None, 
-    start_rad: float = 0.01,
-    max_rad: float = 0.8,
-    gap: float = 0.01,
-    compared: bool = False,
-    estimated: bool = True, 
-) -> None:
-    """
-    Plots cryo-EM map density, estimated Gaussian in QEB, Gaussian in qscore. 
+        density_map, 
+        estimated_density_maps, 
+        max_radius,
+        gap,
+        labels,
+        colors, 
+        subplots_num = None,
+        seperated = False,
+        save=False
+):
+    font = {'weight' : 'bold', 'size': 25}
 
-    Parameters:
-    -----------
-    radius_density: dict[str, np.ndarray]
-        The dictionary of radius densities.
-    estimated_radius_density: dict[str, np.ndarray]
-        The dictionary of estimated radius densities in QEB.
-    qscore_radius_density: dict[str, np.ndarray]
-        The dictionary of qscore radius densities in qscore.
-    A_B: tuple[float, float]
-        The tuple of coefficients.
-    amino_acid: Optional[str] (default=None)
-        An amino acid to plot. If None, all amino acids are plotted.
-    indexes: Optional[List[int]] (default=None)
-        Indexes of radius densities to plot.
-    start_rad: float (default=0.01)
-            Minimum radius for generating grid points. 
-    max_rad: float (default=0.8)
-        Maximum radius for generating grid points. 
-    gap: float (default=0.01)
-        Gap between radii for generating grid points. 
-    compared: bool (default=False)
-        Whether to compare the estimated Gaussian with the Gaussian in qscore.
-    estimated: bool (default=True)
-        Whether to plot the estimated Gaussian.
+    matplotlib.rc('font', **font)
+    # random.seed(527527)
+    # number_of_colors = 20
+    # color = ["#"+''.join([random.choice('0123456789ABCDEF') for j in range(6)])for i in range(number_of_colors)]
+    subplots_num = len(density_map) if not subplots_num else subplots_num
+    nums = int(subplots_num / 5) + 1 if subplots_num % 5 != 0 else int(subplots_num / 5)
+    fig, axes = plt.subplots(nums, 5, figsize=(25, nums * 4), sharex=True, sharey=True, squeeze=False)
+    x = np.arange(0, max_radius - gap, gap)
+    length = len(x)
+    if seperated:
+        curr_times = 0
+        for name in density_map: 
+            chosen_estimated_density_maps = list(map(lambda x: x[name], estimated_density_maps))
+            for times, elements in enumerate(zip(density_map[name], chosen_estimated_density_maps[0])):
+                density, estimated_density = elements
+                i = (times + curr_times) // 5
+                j = (times + curr_times) % 5
+                axes[i][j].plot(x, density[:length], linewidth=1, alpha=0.5, c="orange", label="map")
+                axes[i][j].plot(x, estimated_density[:length], label=labels[0], linestyle="--", c=colors[0], linewidth=1.5)
+                # axes[i][j].set_title(name)
+                axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
+            curr_times += (times + 1)
+    else:
+        for times, name in enumerate(density_map): 
+            i = times // 5
+            j = times % 5
+            chosen_estimated_density_maps = list(map(lambda x: x[name], estimated_density_maps))
+            for density in density_map[name]:
+                axes[i][j].plot(x, density[:length], linewidth=1, alpha=0.5, c="orange", label="map")
+                for idx, estimated_density in enumerate(chosen_estimated_density_maps):
+                    axes[i][j].plot(x, estimated_density[:length], label=labels[idx], linestyle="--", c=colors[idx], linewidth=1.5)
+            axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
+            # axes[i][j].set_title(name)
+    
+    labels_handles = {
+    label: handle for ax in fig.axes for handle, label in zip(*ax.get_legend_handles_labels())
+    }
 
-    Return
-    ----------
-    None
-    """
-    x_axis = np.arange(start_rad, max_rad, gap)
-    # If not choose specific amino acid, then plot all types
-    radius_density = {amino_acid: radius_density[amino_acid]} if amino_acid is not None else radius_density
-    # estimated_radius_density = {amino_acid: estimated_radius_density[amino_acid]} if amino_acid is not None else estimated_radius_density
-    weighted_estimated_radius_density = {amino_acid: weighted_estimated_radius_density[amino_acid]} if amino_acid is not None else weighted_estimated_radius_density
-    qscore_radius_density = {amino_acid: qscore_radius_density[amino_acid]} if amino_acid is not None else qscore_radius_density
-    for key, mean_densities in radius_density.items():
-        mean_densities = np.array(mean_densities)[indexes] if indexes is not None else mean_densities
-        # estimated_mean_densities = np.array(estimated_radius_density[key]) if indexes is not None else estimated_radius_density[key]
-        weighted_estimated_mean_densities = np.array(weighted_estimated_radius_density[key]) if indexes is not None else weighted_estimated_radius_density[key]
-        
-        # qscores = np.array(qscores[key]) if qscores is not None else qscores[key]
+    fig.legend(
+    labels_handles.values(),
+    labels_handles.keys(),
+    loc = "upper center",
+    bbox_to_anchor = (0.25, 0.1),
+    bbox_transform = plt.gcf().transFigure,
+    ncol=len(labels) + 1
+    )
 
-        qscore_mean_densities = np.array(qscore_radius_density[key]) if indexes is not None else qscore_radius_density[key]
-        indexes = indexes if indexes is not None else list(range(len(mean_densities)))
-        num_plot = int(len(indexes) / 3) + 1 if len(indexes) % 3 != 0 else int(len(indexes) / 3)
-        fig, ax = plt.subplots(num_plot, 3, figsize=(12, int(4 * num_plot)))
-        for times, data in enumerate(zip(indexes, mean_densities)):
-            index, mean_density = data
-            i = times // 3
-            j = times % 3
-            ax[i][j].plot(x_axis, mean_density, label="u")
-            if estimated:
-                # ax[i][j].plot(x_axis, estimated_mean_densities[index], "--", label="v")
-                ax[i][j].plot(x_axis, weighted_estimated_mean_densities[index], "-.", label="new_v")
-                # plt.plot(x_axis, (2*np.pi*0.6**2)**(-3/2)*np.exp(-1/(2*0.6**2)*x_axis**2)*A_B[0] + A_B[1], label="gaussian in qscore?")
-                # plt.plot(x_axis, qscore_mean_densities[index], label="gaussian in qscore?")
-                ax[i][j].set_title(key)
-                # ax[i][j].text(0, 0, f"QEB = {round(qscores[index], 4)}",fontsize=14)
-                if not compared:
-                    ax[i][j].legend(loc="upper right")
-        plt.setp(ax[-1, :], xlabel="Distance to the Center (Anstrom)")
-        plt.setp(ax[:, 0], ylabel="Density")
-        indexes = None
-        plt.show()
+    # ax_arr = axes.flatten()
+    # ax_arr[0].get_shared_x_axes().join(ax_arr[0], *ax_arr)
+    fig.supxlabel('Radius')
+    fig.supylabel('Voxel Value')
+    plt.tight_layout()
+    fig.tight_layout(rect=(0.025, 0.03, 1, 1))
+    if save:
+        fig.savefig("../figures/densities_compared.png")
+
+    return
