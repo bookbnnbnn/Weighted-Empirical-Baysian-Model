@@ -1,10 +1,8 @@
 import numpy as np
 import pandas as pd
+from scipy.stats import invgamma, multivariate_normal
 import random
 import logging
-from scipy.optimize import minimize, fsolve
-from scipy.special import digamma
-from scipy.optimize import fsolve
 from typing import List, Dict, Tuple, Optional
 from .utils import *
 from .calculation import *
@@ -16,12 +14,34 @@ logging.getLogger().setLevel(logging.INFO)
 
 class WQEB:
     def create_data(self, 
-                    group_num = 5,
-                    group_name = ["A", "B", "C", "D", "E"], 
-                    in_group_num = 6,
-                    contained_ratio_data = 0.1,
-                    contained_ratio_beta = 0.1,
+                    group_num: int = 5,
+                    group_name: list = ["A", "B", "C", "D", "E"], 
+                    in_group_num: int = 6,
+                    contained_ratio_data:  float = 0.1,
+                    contained_ratio_beta: float = 0.1,
                     ):
+        """
+        Function to create data for the model.
+
+        Params
+        ----------
+        group_num: int
+            Number of groups.
+        group_name: list
+            Names of the groups.
+        in_group_num: int
+            Number of samples in each group.
+        contained_ratio_data: float
+            Contamination ratio for the data.
+        contained_ratio_beta: float
+            Contamination ratio for the beta values.
+
+        Returns
+        ----------
+        self.data_log: dict
+            Dictionary containing the generated data.
+        """
+        
         # hyperparameter 
         contained_group_num = int(in_group_num * contained_ratio_beta) 
         self.mus = {group_name[idx]: val for idx, val in enumerate(np.array([[-8, 8]] * group_num))}
@@ -35,7 +55,7 @@ class WQEB:
         self.distances_to_center = {group_name[idx]: val for idx, val in enumerate(np.array([[distances_to_center]* in_group_num] * group_num))}
         self.Xs_tilde = {group_name[idx]: val for idx, val in enumerate(np.array(X_tilde * group_num))}
         self.lambdas = {group_name[idx]: val for idx, val in enumerate([np.ones(in_group_num)] * group_num)}
-        self.weight_matrixs = {group_name[idx]: val for idx, val in enumerate(np.array([[np.eye(grid_num)] * in_group_num] * group_num))}
+        self.weights = {group_name[idx]: val for idx, val in enumerate([np.ones((in_group_num, grid_num))] * group_num)}
 
         # prior
         sigmas = []
@@ -43,6 +63,7 @@ class WQEB:
             sigmas.append(invgamma.rvs(a=v / 2, scale=v * s / 2, size=in_group_num))
         self.sigmas = {group_name[idx]: val for idx, val in enumerate(np.array(sigmas))}
 
+        # beta
         betas = []
         for mu, sigma_all, lambda_all in \
             zip(self.mus.values(), self.sigmas.values(), self.lambdas.values()):
@@ -61,24 +82,15 @@ class WQEB:
         # data
         ys_tilde = []
         ys_tilde_clean = []
-        for beta_all, sigma_all, weight_matrix_all, X_tilde_all in \
-            zip(self.betas.values(), self.sigmas.values(), self.weight_matrixs.values(), self.Xs_tilde.values()):
+        for beta_all, sigma_all, weight_all, X_tilde_all in \
+            zip(self.betas.values(), self.sigmas.values(), self.weights.values(), self.Xs_tilde.values()):
             y_tilde = []
             y_tilde_clean = []
-            for beta, sigma, weight_matrix, X_tilde in zip(beta_all, sigma_all, weight_matrix_all, X_tilde_all):
-                data = multivariate_normal.rvs(X_tilde @ beta, sigma * weight_matrix)
+            for beta, sigma, weight, X_tilde in zip(beta_all, sigma_all, weight_all, X_tilde_all):
+                data = multivariate_normal.rvs(X_tilde @ beta, sigma * np.diag(weight))
                 if contained_ratio_data > 0:
                     index = np.random.choice(np.arange(0, grid_num), int(grid_num * contained_ratio_data), replace=False)
-                    # contaminated_num = int(grid_num * contained_ratio_data)
-                    # radius_num = int((0.51 - 0.01) / 0.01) + 1
-                    # print(radius_num)
-                    # print(contaminated_num)
-                    # one_time = np.random.choice(np.arange(0, 10), contaminated_num // radius_num, replace=False)
-                    # index = [num + 10 * i for num in one_time for i in range(radius_num)]
-                    # print(len(index))
-                    # index = np.random.choice(index, contaminated_num)
-                    # print(len(index))
-                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-1, 1]), sigma * weight_matrix[index, index])
+                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-1, 1]), sigma * np.diag(weight[index]))
                 else:
                     index = [] 
                 y_tilde.append(data)
@@ -128,7 +140,7 @@ class WQEB:
         max_iter: int (default=30)
             Maximum number of iterations for generating grid points.
 
-        Return
+        Returns
         ----------
         Dict[str, np.ndarray]: 
             the dictionary containing the log values of the interpolated data for each atom type.
@@ -147,8 +159,25 @@ class WQEB:
         self.numbers_of_each_type = {atom: len(self.data_log[atom]) for atom in self.data_log.keys()}
         return self.data_log
 
-    def paramters_initial(self):
+    def paramters_initial(self)-> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+        """
+        Initializes the parameters for the model.
 
+        Returns
+        ----------
+        Tuple containing dictionaries of initialized parameters
+
+        mus_initial: Dict[str, np.ndarray]
+            Initial values of mus
+        sigmas_initial: Dict[str, np.ndarray]
+            Initial values of sigmas
+        weights: Dict[str, np.ndarray]
+            Initial values of weights
+        lambdas: Dict[str, np.ndarray]
+            Initial values of lambdas
+        """
+            
+        # Initialize mus_initial
         mus_initial = []
         for X_tilde_all, y_tilde_all in zip(self.Xs_tilde.values(), self.data_log.values()):
             mu_initial = []
@@ -157,62 +186,85 @@ class WQEB:
             mus_initial.append(np.median(mu_initial, axis=0))
         self.mus_initial = {name: val for name, val in zip(self.data_log, mus_initial)}
 
-        self.sigmas_initial = caluculate_sigmas(self.Xs_tilde, self.data_log, self.mus_initial, initial=True)
-
-        self.weight_matrixs = {}
-        for name in self.Xs_tilde:
-            weight_matrix_new = []
-            for X_tilde in self.Xs_tilde[name]:
-                weight_matrix_new.append(np.eye(len(X_tilde)))
-            self.weight_matrixs[name] = np.array(weight_matrix_new)
+        # Calculate sigmas_initial using the caluculate_sigmas function
+        self.sigmas_initial = calculate_sigmas(self.Xs_tilde, self.data_log, self.mus_initial, initial=True)
+        
+        # Initialize weights and lambdas dictionaries
+        self.weights = {name: np.ones((len(self.Xs_tilde[name]), len(self.distances_to_center[name][i]))) for name in self.Xs_tilde for i in range(len(self.Xs_tilde[name]))}
         self.lambdas = {name: np.ones(len(self.Xs_tilde[name])) for name in self.Xs_tilde}
         
-        return self.mus_initial, self.sigmas_initial, self.weight_matrixs, self.lambdas
+        return self.mus_initial, self.sigmas_initial, self.weights, self.lambdas
 
-    def algorithm_iter(self, max_iter = 3, alpha = 0.1, gamma = 0.1, tol = 1e-4, patience = 3, verbose = True):
-        # self.betas_WEB = caculate_mus_tilde(
-        #     self.Xs_tilde, self.data_log, self.weight_matrixs, self.lambdas, self.mus_initial)
+    def algorithm_iter(self, 
+                       max_iter: int = 3, 
+                       alpha: float = 0.1, 
+                       gamma: float = 0.1, 
+                       tol: float = 1e-4, 
+                       patience: int = 3, 
+                       verbose: bool = True
+    ) -> Tuple[Dict[str, np.ndarray], float]:
+        """
+        Runs the iterative algorithm to estimate parameters.
+
+        Params
+        ----------
+        max_iter: int
+            Maximum number of iterations.
+        alpha: float
+            Alpha hyperparameter.
+        gamma: float
+            Gamma hyperparameter.
+        tol: float
+            Tolerance for convergence.
+        patience: int
+            Number of iterations without improvement to tolerate before stopping.
+        verbose: bool
+            If True, display iteration progress.
+
+        Returns
+        ----------
+            Tuple containing the estimated betas and the mean beta difference.
+        """
+        # Initialize variables
         self.mus_mle = self.mus_initial
         self.sigmas_median  = self.sigmas_initial
         self.densities_data = density_mean([self.data], self.distances_to_center)[0]
-        best_similarity = -np.inf
         least_difference = np.inf
         cur_betas = self.mus_initial
         self.beta_histories = []
         self.beta_differences_histories = []
         iter_num = 0
         for i in tqdm(range(max_iter), disable = not verbose):
-            self.betas_WEB = caculate_mus_tilde(self.Xs_tilde, self.data_log, self.weight_matrixs, self.lambdas, self.mus_mle)
-            self.mus_mle = caculate_mus_mle(self.Xs_tilde, self.data_log, self.sigmas_median, self.weight_matrixs, self.lambdas)
-            self.sigmas_median = caluculate_sigmas(self.Xs_tilde, self.data_log, self.betas_WEB)
-            self.weight_matrixs, self.lambdas = caculate_weights_and_lamdas(
+            # Iterate the algorithm
+            self.betas_WEB = caculate_mus_tilde(self.Xs_tilde, self.data_log, self.weights, self.lambdas, self.mus_mle)
+            self.mus_mle = caculate_mus_mle(self.Xs_tilde, self.data_log, self.sigmas_median, self.weights, self.lambdas)
+            self.sigmas_median = calculate_sigmas(self.Xs_tilde, self.data_log, self.betas_WEB)
+            self.weights, self.lambdas = caculate_weights_and_lamdas(
                 self.Xs_tilde, self.data_log, self.betas_WEB, self.sigmas_median, alpha, gamma, self.mus_mle)
-            # self.weight_matrixs, self.lambdas = caculate_weights_and_lamdas(
-            #     self.Xs_tilde, self.data_log, self.betas_WEB, self.sigmas_median , self.mus_mle, alpha, gamma)
-            # self.mus_mle = caculate_mus_mle(self.Xs_tilde, self.data_log, self.sigmas_median, self.weight_matrixs, self.lambdas)
-            # self.sigmas_median = caluculate_sigmas(self.Xs_tilde, self.data_log, self.mus_mle, initial=True)
-            # self.betas_WEB = caculate_mus_tilde(self.Xs_tilde, self.data_log, self.weight_matrixs, self.lambdas, self.mus_mle)
             
+            # Calculate the voxel values on the grid points created by the current betas 
             self.points_betas_WEB = caculate_points(self.Xs_tilde, self.betas_WEB)
+
+            # Calculate the density of the voxel values on the grid points created by the current betas
             self.densities_betas_WEB = density_mean([self.points_betas_WEB], self.distances_to_center)[0]
+            
+            # Calculate the similarity between the data and the current betas
             self.similarities = caculate_similarity(self.densities_data, self.densities_betas_WEB)
-            # similarity_all = [np.mean(similarity) for similarity in self.similarities.values()]
             similarity_all = []
             for similarity in self.similarities.values():
                 similarity_all.extend(similarity)
 
+            # Calculate the difference between the current betas and the previous betas
             beta_differences = []
             for new_beta, cur_beta in zip(cur_betas.values(), self.betas_WEB.values()):
                 beta_differences.extend((new_beta - cur_beta) ** 2)
+
             if verbose:
                 logging.info(f"Iteration {i} finished. with difference: {np.mean(beta_differences)}")
-                # print(len(np.where(np.array(similarity_all) < 0.95)[0]))
-                # sum_weights = {name: np.sum([np.diag(weight_matrix) for weight_matrix in self.weight_matrixs[name]], axis=1) for name in self.weight_matrixs}
-                # logging.info(f"Iteration {i} finished. with weights: {sum_weights}, lambdas: {self.lambdas}")
-            
-            # if np.mean(similarity_all) > best_similarity:
-            #     best_similarity = np.mean(similarity_all)
+
             iter_num += 1
+
+            # Check convergence criteria and update variables
             if np.mean(beta_differences) > tol and iter_num < (patience + 1):
                 if np.mean(beta_differences) < least_difference:
                     least_difference = np.mean(beta_differences)
@@ -224,50 +276,37 @@ class WQEB:
                 break
         return self.betas_WEB, np.mean(beta_differences)
 
-    def weighted_linear_regression(self, iter_num = 3, alpha = 0.1, gamma = 0.1, verbose = True):
-        self.sigmas_median  = self.sigmas_initial
-        self.densities_data = density_mean([self.data], self.distances_to_center)[0]
-        best_similarity = -np.inf
-        for i in tqdm(range(iter_num), disable=not verbose):
-            self.betas_weighted = caculate_weighted_beta(self.Xs_tilde, self.data_log, self.weight_matrixs)
-            self.sigmas_median = caluculate_sigmas(self.Xs_tilde, self.data_log, self.betas_weighted)
-            self.weight_matrixs, Q = caculate_weights_and_lamdas(
-                self.Xs_tilde, self.data_log, self.betas_weighted, self.sigmas_median, alpha, gamma)
-        
-            self.points_betas_weighted = caculate_points(self.Xs_tilde, self.betas_weighted)
-            self.densities_betas_weighted = density_mean([self.points_betas_weighted], self.distances_to_center)[0]
-            self.similarities = caculate_similarity(self.densities_data, self.densities_betas_weighted)
-            similarity_all = []
-            for similarity in self.similarities.values():
-                similarity_all.extend(similarity)
-            if verbose:
-                logging.info(f"Iteration {i} finished. with similarity: {np.min(similarity_all)}")
-                # print(len(np.where(np.array(similarity_all) < 0.95)[0]))
-                # sum_weights = {name: np.sum([np.diag(weight_matrix) for weight_matrix in self.weight_matrixs[name]], axis=1) for name in self.weight_matrixs}
-                # logging.info(f"Iteration {i} finished. with weights: {sum_weights}, lambdas: {self.lambdas}")
-            
-            # if np.min(similarity_all) > best_similarity:
-            #     best_similarity = np.min(similarity_all)
-            # else:
-            #     break
 
-        return self.betas_weighted
-    
-    
-    def plot_data(self, max_radius, gap, save=False):
-        self.betas_em_mean = {name: np.mean(betas, axis=0) for name, betas in self.betas_WEB.items() if len(betas) > 0}
-        # self.betas_em_weighted_mean = {betas_item[0]: np.sum(np.repeat(lambda_, 2).reshape(-1, 2) * betas_item[1], axis=0) / np.sum(lambda_) \
-        #                                for betas_item, lambda_ in zip(self.betas_WEB.items(), self.lambdas.values()) if len(betas_item[1]) > 0}
-        
-        self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
-        self.densities_em = caculate_density(self.distances_to_center, self.betas_em_mean)
-        # self.densities_em_weighted = caculate_density(self.distances_to_center, self.betas_em_weighted_mean)
+def plot_data(self, max_radius: float, gap: float, save: bool = False) -> None:
+    """
+    Plot the data densities.
 
-        plot_density(self.densities_data, 
-                     [self.densities_mle, self.densities_em], 
-                     max_radius, 
-                     gap, 
-                     ["MLE", "WEB mean"], 
-                     ["blue", "red"], 
-                     save=save)
-        
+    Params
+    ----------
+    max_radius: float
+        Maximum radius for the plot.
+    gap: float
+        Gap between the grid points.
+    save: bool
+        If True, save the plot as an image file (optional).
+
+    Returns
+    ----------
+        None
+    """
+
+    # Calculate mean betas using the estimated WEB betas
+    self.betas_em_mean = {name: np.mean(betas, axis=0) for name, betas in self.betas_WEB.items() if len(betas) > 0}
+    
+    # Calculate densities using MLE and estimated mean betas
+    self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
+    self.densities_em = caculate_density(self.distances_to_center, self.betas_em_mean)
+    
+    # Plot the densities
+    plot_density(self.densities_data, 
+                 [self.densities_mle, self.densities_em], 
+                 max_radius, 
+                 gap, 
+                 ["MLE", "WEB mean"], 
+                 ["blue", "red"], 
+                 save=save)
