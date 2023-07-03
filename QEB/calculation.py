@@ -192,7 +192,7 @@ def caculate_weights_and_lamdas(
     Xs_tilde: Dict[str, np.ndarray],
     ys_tilde: Dict[str, np.ndarray],
     betas_em: Dict[str, np.ndarray],
-    sigmas_mle: Dict[str, np.ndarray],
+    sigmas: Dict[str, np.ndarray],
     alpha: float,
     gamma: float,
     mus_mle: Dict[str, np.ndarray] = None
@@ -208,7 +208,7 @@ def caculate_weights_and_lamdas(
         Dictionary of ys tilde arrays.
     betas_em: Dict[str, np.ndarray]
         Dictionary of beta_em arrays.
-    sigmas_mle: Dict[str, np.ndarray]
+    sigmas: Dict[str, np.ndarray]
         Dictionary of sigma_mle arrays.
     alpha: float
         Alpha parameter value.
@@ -230,19 +230,18 @@ def caculate_weights_and_lamdas(
     weights = {name: None for name in ys_tilde}
     lambdas = {name: None for name in ys_tilde}
     
-    for name, X_tilde_all, y_tilde_all, beta_em_all, sigma_mle_all in \
-        zip(ys_tilde, Xs_tilde.values(), ys_tilde.values(), betas_em.values(), sigmas_mle.values()):
+    for name, X_tilde_all, y_tilde_all, beta_em_all, sigma_all in \
+        zip(ys_tilde, Xs_tilde.values(), ys_tilde.values(), betas_em.values(), sigmas.values()):
         mu_mle = mus_mle[name] if mus_mle is not None else None
         weight = np.array([np.ones(len(y_tilde_all[0]))] * len(y_tilde_all))
         lambda_ = np.ones(len(beta_em_all))
 
-        for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_em_all, sigma_mle_all)):
+        for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_em_all, sigma_all)):
             X_tilde, y_tilde, beta_em, sigma_mle = elements
 
             # Calculate weight
-            coeff_w = ((1 + alpha) / ((2 * np.pi)**(alpha / 2) * sigma_mle**(alpha / 2 + 1)))
             exponential_w = np.exp(-(alpha / (2 * sigma_mle)) * (y_tilde - X_tilde @ beta_em)**2)
-            weight[idx] = coeff_w * exponential_w / np.sum(coeff_w * exponential_w) * len(y_tilde) 
+            weight[idx] =  exponential_w / np.sum(exponential_w) * len(y_tilde) 
 
             # Calculate lambda
             if mu_mle is not None:
