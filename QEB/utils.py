@@ -11,7 +11,6 @@ from scipy.stats import norm
 from collections import Counter
 from typing import List, Dict, Tuple, Optional
 from numba import njit
-import random
 
 
 def read_map(root: str) -> Tuple[np.ndarray]:
@@ -120,7 +119,6 @@ def generate_grid_points(
         gap: float= 0.01,
         max_points: int = 8,
         base_num_points: int = 4,
-        max_iter: int = 30
 ) -> Tuple[Dict[str, List[np.ndarray]]]:
     """
     Generate grid points from each center that we chose from atomic model
@@ -139,8 +137,6 @@ def generate_grid_points(
         Maximum number of points to generate at each radius. 
     base_num_points: int (default=4)
         Number of points to generate at the minimum radius. 
-    max_iter: int (default=30)
-        The maximal iteration that we want to find the grid points
 
     Return
     ----------
@@ -149,7 +145,7 @@ def generate_grid_points(
     distances_to_center: Dict[str, List[np.ndarray]]
         The distances(radius) of grid points to center respectively
     """
-    rads = np.round(np.arange(start_rad, max_rad, gap), 2)
+    rads = np.round(np.arange(start_rad, max_rad + gap, gap), 2)
     unique_residue = np.unique(residue_names)
     grid_points_chosen = {name: [] for name in unique_residue}
     distances_to_center = {name: [] for name in unique_residue}
@@ -164,8 +160,8 @@ def generate_grid_points(
         all_Xs_tilde = []
         for rad in rads:
             # The number of grid points we want to search depends on the dense of the ball
-            num_points = int((rad**2 / start_rad**2) * base_num_points)
-            num_candidate = num_points if num_points < max_points else max_points
+            num_points = int((rad**2 / rads[1]**2) * base_num_points)
+            num_candidate = 1 if num_points == 0 else num_points if num_points < max_points else max_points
             atom_point = atom_points[atomic_index].reshape(-1)
             # Search grid points for `MAX_ITER` otherwise give up
 
@@ -266,7 +262,7 @@ def plot_density(
     colors: List,
     subplots_num: int = None,
     separated: bool = False,
-    save: bool = False
+    root: str = None
 ) -> None:
     """
     Plot the density maps and the corresponding estimated density maps.
@@ -286,11 +282,11 @@ def plot_density(
     colors: List
         List of colors for the estimated density maps.
     subplots_num: int = None
-        Number of subplots to create (default: None).
+        Number of subplots to create.
     separated: bool = False
-        Flag indicating whether to plot the density maps separately (default: False).
-    save: bool = False
-        Flag indicating whether to save the figure (default: False).
+        Flag indicating whether to plot the density maps separately.
+    root: str = None
+        The root where you want to save the figure.
 
     Returns
     -------
@@ -307,7 +303,7 @@ def plot_density(
 
     # Create the subplots
     fig, axes = plt.subplots(nums, 5, figsize=(25, nums * 4), sharex=True, sharey=True, squeeze=False)
-    x = np.arange(0, max_radius - gap, gap)
+    x = np.arange(0, max_radius + gap, gap)
     length = len(x)
 
     # Plot the density maps and estimated density maps separately
@@ -333,7 +329,7 @@ def plot_density(
             for density in density_map[name]:
                 axes[i][j].plot(x, density[:length], linewidth=1, alpha=0.5, c="orange", label="map")
                 for idx, estimated_density in enumerate(chosen_estimated_density_maps):
-                    axes[i][j].plot(x, estimated_density[:length], label=labels[idx], linestyle="--", c=colors[idx], linewidth=1.5)
+                    axes[i][j].plot(x, estimated_density[:length], label=labels[idx], linestyle="--", c=colors[idx], linewidth=3)
             axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
     
     labels_handles = {label: handle for ax in fig.axes for handle, label in zip(*ax.get_legend_handles_labels())}
@@ -357,7 +353,7 @@ def plot_density(
     fig.tight_layout(rect=(0.025, 0.03, 1, 1))
 
     # Save the figure if specified
-    if save:
-        fig.savefig("../figures/densities_compared.png")
+    if root:
+        fig.savefig(root)
 
     return
