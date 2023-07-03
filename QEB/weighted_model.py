@@ -49,7 +49,7 @@ class WQEB:
         self.ss = {group_name[idx]: val for idx, val in enumerate([0.1] * group_num)}
 
         # grid points
-        distances_to_center = np.repeat(np.arange(0.01, 0.51, 0.01), 10)
+        distances_to_center = np.repeat(np.arange(0, 0.51, 0.01), 100)
         grid_num = len(distances_to_center)
         X_tilde = [[np.concatenate((np.ones((grid_num, 1)), (-1/ 2 * distances_to_center ** 2).reshape(-1, 1)), axis=1).tolist()] * in_group_num]
         self.distances_to_center = {group_name[idx]: val for idx, val in enumerate(np.array([[distances_to_center]* in_group_num] * group_num))}
@@ -101,6 +101,7 @@ class WQEB:
             ys_tilde_clean.append(np.array(y_tilde_clean))
         self.data_log = {group_name[idx]: val for idx, val in enumerate(ys_tilde)}
         self.data = {group_name[idx]: np.exp(val) for idx, val in enumerate(ys_tilde_clean)}
+        self.densities_data = density_mean([self.data], self.distances_to_center)[0]
         return self.data_log
     
     def read_data(
@@ -108,12 +109,11 @@ class WQEB:
             root_map: str,
             root_pdb: str,
             atomic: Optional[str] = None,
-            start_rad: float = 0.01,
+            start_rad: float = 0,
             max_rad: float = 1,
-            gap: float = 0.01,
-            max_points: int = 8,
+            gap: float = 0.2,
+            max_points: int = 100,
             base_num_points: int = 4,
-            max_iter: int = 30
     ) -> Dict[str, np.ndarray]:
         """
         Reads map and pdb files, generates grid points, interpolates data, and returns the log values of the
@@ -137,8 +137,6 @@ class WQEB:
             Maximum number of points to generate at each radius. 
         base_num_points: int (default=4)
             Number of points to generate at the minimum radius. 
-        max_iter: int (default=30)
-            Maximum number of iterations for generating grid points.
 
         Returns
         ----------
@@ -152,11 +150,12 @@ class WQEB:
         residue_names = np.array(df_processed["residue_name"])
         atom_points = np.column_stack((df_processed.x_coord, df_processed.y_coord, df_processed.z_coord))
         self.grid_points, self.distances_to_center, self.Xs_tilde = generate_grid_points(
-            atom_points, residue_names, start_rad, max_rad, gap, max_points, base_num_points, max_iter)
+            atom_points, residue_names, start_rad, max_rad, gap, max_points, base_num_points)
         self.interp_func = interpolator(data, grid_size, origin)
         self.data = {key: self.interp_func(grid_points) for key, grid_points in self.grid_points.items()}
         self.data_log = {key: np.log(value + 1e-35) for key, value in self.data.items()}
         self.numbers_of_each_type = {atom: len(self.data_log[atom]) for atom in self.data_log.keys()}
+        self.densities_data = density_mean([self.data], self.distances_to_center)[0]
         return self.data_log
 
     def paramters_initial(self)-> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
@@ -228,7 +227,6 @@ class WQEB:
         # Initialize variables
         self.mus_mle = self.mus_initial
         self.sigmas_median  = self.sigmas_initial
-        self.densities_data = density_mean([self.data], self.distances_to_center)[0]
         least_difference = np.inf
         cur_betas = self.mus_initial
         self.beta_histories = []
@@ -274,39 +272,41 @@ class WQEB:
                 self.beta_differences_histories.append(np.mean(beta_differences))
             else:
                 break
+
+        self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
+
         return self.betas_WEB, np.mean(beta_differences)
 
 
-def plot_data(self, max_radius: float, gap: float, save: bool = False) -> None:
-    """
-    Plot the data densities.
+    def plot_data(self, max_radius: float, gap: float, root: str = False) -> None:
+        """
+        Plot the data densities.
 
-    Params
-    ----------
-    max_radius: float
-        Maximum radius for the plot.
-    gap: float
-        Gap between the grid points.
-    save: bool
-        If True, save the plot as an image file (optional).
+        Params
+        ----------
+        max_radius: float
+            Maximum radius for the plot.
+        gap: float
+            Gap between the grid points.
+        root: str = None
+            The root where you want to save the figure.
 
-    Returns
-    ----------
-        None
-    """
+        Returns
+        ----------
+            None
+        """
 
-    # Calculate mean betas using the estimated WEB betas
-    self.betas_em_mean = {name: np.mean(betas, axis=0) for name, betas in self.betas_WEB.items() if len(betas) > 0}
-    
-    # Calculate densities using MLE and estimated mean betas
-    self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
-    self.densities_em = caculate_density(self.distances_to_center, self.betas_em_mean)
-    
-    # Plot the densities
-    plot_density(self.densities_data, 
-                 [self.densities_mle, self.densities_em], 
-                 max_radius, 
-                 gap, 
-                 ["MLE", "WEB mean"], 
-                 ["blue", "red"], 
-                 save=save)
+        # Calculate mean betas using the estimated WEB betas
+        self.betas_em_mean = {name: np.mean(betas, axis=0) for name, betas in self.betas_WEB.items() if len(betas) > 0}
+        
+        # Calculate densities using estimated mean betas
+        self.densities_em = caculate_density(self.distances_to_center, self.betas_em_mean)
+        
+        # Plot the densities
+        plot_density(self.densities_data, 
+                    [self.densities_mle, self.densities_em], 
+                    max_radius, 
+                    gap, 
+                    ["MLE", "WEB mean"], 
+                    ["blue", "red"], 
+                    root=root)
