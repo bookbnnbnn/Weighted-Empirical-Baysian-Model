@@ -135,13 +135,17 @@ def caculate_mus_mle(Xs_tilde: Dict[str, np.ndarray],
         numerators = np.array([np.ones(2)] * len(y_tilde_all))
         for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weight_all, lambda_all)):          
             X_tilde, y_tilde, sigma, weight, lambda_ = elements
+
+            # Calulate the sigma tilde matrix
             x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
             XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
             xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
             XWY = np.array([xy1, xy2])
-            A = np.linalg.inv(XWX + lambda_ * np.eye(2))
-            denominator = lambda_ / sigma * (np.eye(2) - A * lambda_)
-            numerator = lambda_ / sigma * A @ XWY
+            sigma_tilde_matrix = np.linalg.inv(XWX + lambda_ * np.eye(2))
+
+            # Calulate the denominator and numerator to get mus MLE
+            denominator = lambda_ / sigma * (np.eye(2) - sigma_tilde_matrix * lambda_)
+            numerator = lambda_ / sigma * sigma_tilde_matrix @ XWY
             denominators[idx] = denominator
             numerators[idx] = numerator
         mus_mle[name] = np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
