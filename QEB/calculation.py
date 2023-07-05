@@ -241,16 +241,16 @@ def caculate_weights_and_lamdas(
         lambda_ = np.ones(len(beta_em_all))
 
         for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_em_all, sigma_all)):
-            X_tilde, y_tilde, beta_em, sigma_mle = elements
+            X_tilde, y_tilde, beta_em, sigma = elements
 
             # Calculate weight
-            exponential_w = np.exp(-(alpha / (2 * sigma_mle)) * (y_tilde - X_tilde @ beta_em)**2)
+            exponential_w = np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta_em)**2)
             weight[idx] =  exponential_w / np.sum(exponential_w) * len(y_tilde) 
 
             # Calculate lambda
             if mu_mle is not None:
-                coeff_l = ((1 + gamma) / ((2 * np.pi)**(gamma / 2) * sigma_mle**(gamma / 2 + 1)))
-                exponential_l = np.exp(-(gamma / (2 * sigma_mle)) * ((beta_em - mu_mle).T @ np.eye(2) @ (beta_em - mu_mle)))
+                coeff_l = sigma**(-(gamma + 2) / 2)
+                exponential_l = np.exp(-(gamma / (2 * sigma)) * ((beta_em - mu_mle).T @ np.eye(2) @ (beta_em - mu_mle)))
                 lambda_[idx] =  coeff_l * exponential_l
         
         weights[name] = weight
