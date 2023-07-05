@@ -188,11 +188,12 @@ class WQEB:
         # Calculate sigmas_initial using the caluculate_sigmas function
         self.sigmas_initial = calculate_sigmas(self.Xs_tilde, self.data_log, self.mus_initial, initial=True)
         
-        # Initialize weights and lambdas dictionaries
-        self.weights = {name: np.ones((len(self.Xs_tilde[name]), len(self.distances_to_center[name][i]))) for name in self.Xs_tilde for i in range(len(self.Xs_tilde[name]))}
-        self.lambdas = {name: np.ones(len(self.Xs_tilde[name])) for name in self.Xs_tilde}
+        # Initialize betas_initial
+        weights = {name: np.ones((len(self.Xs_tilde[name]), len(self.distances_to_center[name][i]))) for name in self.Xs_tilde for i in range(len(self.Xs_tilde[name]))}
+        lambdas = {name: np.ones(len(self.Xs_tilde[name])) for name in self.Xs_tilde}
+        self.betas_initial = caculate_mus_tilde(self.Xs_tilde, self.data_log, weights, lambdas, self.mus_initial)
         
-        return self.mus_initial, self.sigmas_initial, self.weights, self.lambdas
+        return self.mus_initial, self.sigmas_initial, self.betas_initial
 
     def algorithm_iter(self, 
                        max_iter: int = 3, 
@@ -225,20 +226,21 @@ class WQEB:
             Tuple containing the estimated betas and the mean beta difference.
         """
         # Initialize variables
-        self.mus_mle = self.mus_initial
+        self.betas_WEB = self.betas_initial
         self.sigmas_median  = self.sigmas_initial
+        self.mus_mle = self.mus_initial
+        cur_betas = self.betas_initial
         least_difference = np.inf
-        cur_betas = self.mus_initial
         self.beta_histories = []
         self.beta_differences_histories = []
         iter_num = 0
         for i in tqdm(range(max_iter), disable = not verbose):
             # Iterate the algorithm
-            self.betas_WEB = caculate_mus_tilde(self.Xs_tilde, self.data_log, self.weights, self.lambdas, self.mus_mle)
-            self.mus_mle = caculate_mus_mle(self.Xs_tilde, self.data_log, self.sigmas_median, self.weights, self.lambdas)
-            self.sigmas_median = calculate_sigmas(self.Xs_tilde, self.data_log, self.betas_WEB)
             self.weights, self.lambdas = caculate_weights_and_lamdas(
                 self.Xs_tilde, self.data_log, self.betas_WEB, self.sigmas_median, alpha, gamma, self.mus_mle)
+            self.mus_mle = caculate_mus_mle(self.Xs_tilde, self.data_log, self.sigmas_median, self.weights, self.lambdas)
+            self.betas_WEB = caculate_mus_tilde(self.Xs_tilde, self.data_log, self.weights, self.lambdas, self.mus_mle)
+            self.sigmas_median = calculate_sigmas(self.Xs_tilde, self.data_log, self.betas_WEB)
             
             # Calculate the voxel values on the grid points created by the current betas 
             self.points_betas_WEB = caculate_points(self.Xs_tilde, self.betas_WEB)
@@ -254,7 +256,7 @@ class WQEB:
 
             # Calculate the difference between the current betas and the previous betas
             beta_differences = []
-            for new_beta, cur_beta in zip(cur_betas.values(), self.betas_WEB.values()):
+            for new_beta, cur_beta in zip(self.betas_WEB.values(), cur_betas.values()):
                 beta_differences.extend((new_beta - cur_beta) ** 2)
 
             if verbose:
