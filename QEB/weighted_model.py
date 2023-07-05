@@ -170,10 +170,8 @@ class WQEB:
             Initial values of mus
         sigmas_initial: Dict[str, np.ndarray]
             Initial values of sigmas
-        weights: Dict[str, np.ndarray]
-            Initial values of weights
-        lambdas: Dict[str, np.ndarray]
-            Initial values of lambdas
+        self.betas_initial: Dict[str, np.ndarray]
+            Initial values of betas
         """
             
         # Initialize mus_initial
