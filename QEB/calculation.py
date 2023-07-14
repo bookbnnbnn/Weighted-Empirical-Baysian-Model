@@ -2,10 +2,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from collections import Counter
-from numba import njit
 from typing import Dict, Tuple, List
 
-def caculate_mus_tilde(
+def caculate_betas_WEB(
     Xs_tilde: Dict[str, np.ndarray],
     ys_tilde: Dict[str, np.ndarray],
     weights: Dict[str, np.ndarray],
@@ -152,7 +151,7 @@ def caculate_mus_mle(Xs_tilde: Dict[str, np.ndarray],
     return mus_mle
 
 
-def caculate_weighted_beta(
+def caculate_betas_WLR(
     Xs_tilde: Dict[str, np.ndarray],
     ys_tilde: Dict[str, np.ndarray],
     weights: Dict[str, np.ndarray]
@@ -190,6 +189,50 @@ def caculate_weighted_beta(
         betas_tilde.append(np.array(beta_tilde))
 
     return {name: np.array(val) for name, val in zip(ys_tilde, betas_tilde)}
+
+
+def caculate_mus_mle_weighted(Xs_tilde: Dict[str, np.ndarray],
+    ys_tilde: Dict[str, np.ndarray],
+    sigmas: Dict[str, np.ndarray],
+    weights: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    """
+    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
+
+    Params
+    ----------
+    Xs_tilde: Dict[str, np.ndarray]
+        Dictionary of Xs tilde arrays.
+    ys_tilde: Dict[str, np.ndarray]
+        Dictionary of ys tilde arrays.
+    sigmas: Dict[str, np.ndarray]
+        Dictionary of sigma arrays.
+    weights: Dict[str, np.ndarray]
+        Dictionary of weight arrays.
+
+    Returns:
+    ----------
+    Dict[str, np.ndarray]
+        Dictionary containing the calculated mus MLE.
+
+    """
+    mus_mle = {name: None for name in ys_tilde}
+    for name, X_tilde_all, y_tilde_all, sigma_all, weight_all in \
+        zip(ys_tilde, Xs_tilde.values(), ys_tilde.values(), sigmas.values(), weights.values()):
+        denominators = np.array([np.eye(2)] * len(y_tilde_all))
+        numerators = np.array([np.ones(2)] * len(y_tilde_all))
+        for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weight_all)):          
+            X_tilde, y_tilde, sigma, weight = elements
+
+            x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
+            XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
+            xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
+            XWY = np.array([xy1, xy2])
+
+            denominators[idx] = XWX / sigma
+            numerators[idx] = XWY / sigma
+        mus_mle[name] = np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
+    return mus_mle
 
 
 def caculate_weights_and_lamdas(
