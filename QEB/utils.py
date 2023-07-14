@@ -63,14 +63,7 @@ def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
     df = ppdb.df['ATOM']
     if atomic is not None:
         df_chosen = df[df["atom_name"] == atomic] if atomic is not None else df
-        df_well = df_chosen[df_chosen["occupancy"] == 1]
-        df_defected = df_chosen.drop(df_well.index)
-        gb_defected = df_defected.groupby(["chain_id", "residue_name", "residue_number"])
-        new_index = [np.mean(value) for value in gb_defected.groups.values()]
-        new_df = gb_defected.mean().reset_index()
-        new_df.index = new_index
-        df_processed = pd.concat([df_well, new_df])
-        return df_processed
+        return df_chosen
     else:
         return df
     
@@ -316,8 +309,8 @@ def plot_density(
                 density, estimated_density = elements
                 i = (times + curr_times) // 5
                 j = (times + curr_times) % 5
-                axes[i][j].plot(x, density[:length], linewidth=1, alpha=0.5, c="orange", label="map")
-                axes[i][j].plot(x, estimated_density[:length], label=labels[0], linestyle="--", c=colors[0], linewidth=1.5)
+                axes[i][j].plot(x, density[:length], linewidth=0.5, alpha=0.5, c="orange", label="map")
+                axes[i][j].plot(x, estimated_density[:length], label=labels[0], linestyle="--", c=colors[0], linewidth=3)
                 axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
             curr_times += (times + 1)
     else:
@@ -327,7 +320,7 @@ def plot_density(
             j = times % 5
             chosen_estimated_density_maps = list(map(lambda x: x[name], estimated_density_maps))
             for density in density_map[name]:
-                axes[i][j].plot(x, density[:length], linewidth=1, alpha=0.5, c="orange", label="map")
+                axes[i][j].plot(x, density[:length], linewidth=0.5, alpha=0.5, c="orange", label="map")
                 for idx, estimated_density in enumerate(chosen_estimated_density_maps):
                     axes[i][j].plot(x, estimated_density[:length], label=labels[idx], linestyle="--", c=colors[idx], linewidth=3)
             axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
