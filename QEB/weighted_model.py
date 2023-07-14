@@ -8,12 +8,15 @@ from .utils import *
 from .calculation import *
 from copy import copy
 
-random.seed(10)
-np.random.seed(10)
+random.seed(2023)
+np.random.seed(2023)
 logging.getLogger().setLevel(logging.INFO)
 
 class WQEB:
     def create_data(self, 
+                    start_rad: float = 0,
+                    max_rad: float = 1,
+                    gap: float = 0.2,
                     group_num: int = 5,
                     group_name: list = ["A", "B", "C", "D", "E"], 
                     in_group_num: int = 6,
@@ -25,6 +28,12 @@ class WQEB:
 
         Params
         ----------
+        start_rad: float = 0
+            Minimum radius for generating grid points. 
+        max_rad: float = 1
+            Maximum radius for generating grid points. 
+        gap: float = 0.2
+            Gap between radii for generating grid points. 
         group_num: int
             Number of groups.
         group_name: list
@@ -49,7 +58,7 @@ class WQEB:
         self.ss = {group_name[idx]: val for idx, val in enumerate([0.1] * group_num)}
 
         # grid points
-        distances_to_center = np.repeat(np.arange(0, 0.51, 0.01), 100)
+        distances_to_center = np.repeat(np.arange(start_rad, max_rad + gap, gap), 100)
         grid_num = len(distances_to_center)
         X_tilde = [[np.concatenate((np.ones((grid_num, 1)), (-1/ 2 * distances_to_center ** 2).reshape(-1, 1)), axis=1).tolist()] * in_group_num]
         self.distances_to_center = {group_name[idx]: val for idx, val in enumerate(np.array([[distances_to_center]* in_group_num] * group_num))}
@@ -127,15 +136,15 @@ class WQEB:
             Path to the pdb file.
         atomic: Optional[str]
             Atom type to filter by. Defaults to None.
-        start_rad: float (default=0.01)
+        start_rad: float = 0 
             Minimum radius for generating grid points. 
-        max_rad: float (default=0.8)
+        max_rad: float = 1
             Maximum radius for generating grid points. 
-        gap: float (default=0.01)
+        gap: float = 0.2
             Gap between radii for generating grid points. 
-        max_points: int (default=8)
+        max_points: int = 100
             Maximum number of points to generate at each radius. 
-        base_num_points: int (default=4)
+        base_num_points: int = 4
             Number of points to generate at the minimum radius. 
 
         Returns
@@ -145,7 +154,7 @@ class WQEB:
         """
         data, grid_size, origin = read_map(root_map)
         mean, std = np.mean(data), np.std(data)
-        self.A_B = mean + 10 * std, mean - std
+        # self.A_B = mean + 10 * std, mean - std
         df_processed = read_pdb(root_pdb, atomic=atomic)
         residue_names = np.array(df_processed["residue_name"])
         atom_points = np.column_stack((df_processed.x_coord, df_processed.y_coord, df_processed.z_coord))
@@ -189,7 +198,7 @@ class WQEB:
         # Initialize betas_initial
         weights = {name: np.ones((len(self.Xs_tilde[name]), len(self.distances_to_center[name][i]))) for name in self.Xs_tilde for i in range(len(self.Xs_tilde[name]))}
         lambdas = {name: np.ones(len(self.Xs_tilde[name])) for name in self.Xs_tilde}
-        self.betas_initial = caculate_mus_tilde(self.Xs_tilde, self.data_log, weights, lambdas, self.mus_initial)
+        self.betas_initial = caculate_betas_WEB(self.Xs_tilde, self.data_log, weights, lambdas, self.mus_initial)
         
         return self.mus_initial, self.sigmas_initial, self.betas_initial
 
@@ -237,7 +246,7 @@ class WQEB:
             self.weights, self.lambdas = caculate_weights_and_lamdas(
                 self.Xs_tilde, self.data_log, self.betas_WEB, self.sigmas_median, alpha, gamma, self.mus_mle)
             self.mus_mle = caculate_mus_mle(self.Xs_tilde, self.data_log, self.sigmas_median, self.weights, self.lambdas)
-            self.betas_WEB = caculate_mus_tilde(self.Xs_tilde, self.data_log, self.weights, self.lambdas, self.mus_mle)
+            self.betas_WEB = caculate_betas_WEB(self.Xs_tilde, self.data_log, self.weights, self.lambdas, self.mus_mle)
             self.sigmas_median = calculate_sigmas(self.Xs_tilde, self.data_log, self.betas_WEB)
             
             # Calculate the voxel values on the grid points created by the current betas 
@@ -258,7 +267,10 @@ class WQEB:
                 beta_differences.extend((new_beta - cur_beta) ** 2)
 
             if verbose:
-                logging.info(f"Iteration {i} finished. with difference: {np.mean(beta_differences)}")
+                logging.info(f"Iteration {i} finished with difference: {np.mean(beta_differences)}")
+                # MLE, LAMBDA = self.mus_mle["SER"], self.lambdas["SER"]
+                # logging.info(f"Iteration {i} finished with mus_mle: {MLE}")
+                # logging.info(f"Iteration {i} finished with lambdas: {LAMBDA[0]}")
 
             iter_num += 1
 
@@ -276,6 +288,88 @@ class WQEB:
         self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
 
         return self.betas_WEB, np.mean(beta_differences)
+    
+
+    def weighted_linear_iter(self, 
+                       max_iter: int = 3, 
+                       alpha: float = 0.1, 
+                       gamma: float = 0.1, 
+                       tol: float = 1e-4, 
+                       patience: int = 3, 
+                       verbose: bool = True
+    ) -> Tuple[Dict[str, np.ndarray], float]:
+        """
+        Runs the iterative algorithm to estimate parameters.
+
+        Params
+        ----------
+        max_iter: int
+            Maximum number of iterations.
+        alpha: float
+            Alpha hyperparameter.
+        gamma: float
+            Gamma hyperparameter.
+        tol: float
+            Tolerance for convergence.
+        patience: int
+            Number of iterations without improvement to tolerate before stopping.
+        verbose: bool
+            If True, display iteration progress.
+
+        Returns
+        ----------
+            Tuple containing the estimated betas and the mean beta difference.
+        """
+        # Initialize variables
+        self.betas_WLR = self.betas_initial
+        self.sigmas_median_weighted  = self.sigmas_initial
+        cur_betas = self.betas_initial
+        least_difference = np.inf
+        self.beta_histories = []
+        self.beta_differences_histories = []
+        iter_num = 0
+        for i in tqdm(range(max_iter), disable = not verbose):
+            # Iterate the algorithm
+            weights, _ = caculate_weights_and_lamdas(
+                self.Xs_tilde, self.data_log, self.betas_WLR, self.sigmas_median_weighted, alpha, gamma, None)
+            self.mus_mle_weighted = caculate_mus_mle_weighted(self.Xs_tilde, self.data_log, self.sigmas_median_weighted, weights)
+            self.betas_WLR = caculate_betas_WLR(self.Xs_tilde, self.data_log, weights)
+            self.sigmas_median_weighted = calculate_sigmas(self.Xs_tilde, self.data_log, self.betas_WLR)
+            
+            # Calculate the voxel values on the grid points created by the current betas 
+            self.points_betas_WLR = caculate_points(self.Xs_tilde, self.betas_WLR)
+
+            # Calculate the density of the voxel values on the grid points created by the current betas
+            self.densities_betas_WLR = density_mean([self.points_betas_WLR], self.distances_to_center)[0]
+            
+            # Calculate the similarity between the data and the current betas
+            self.similarities = caculate_similarity(self.densities_data, self.densities_betas_WLR)
+            similarity_all = []
+            for similarity in self.similarities.values():
+                similarity_all.extend(similarity)
+
+            # Calculate the difference between the current betas and the previous betas
+            beta_differences = []
+            for new_beta, cur_beta in zip(self.betas_WLR.values(), cur_betas.values()):
+                beta_differences.extend((new_beta - cur_beta) ** 2)
+
+            if verbose:
+                logging.info(f"Iteration {i} finished. with difference: {np.mean(beta_differences)}")
+
+            iter_num += 1
+
+            # Check convergence criteria and update variables
+            if np.mean(beta_differences) > tol and iter_num < (patience + 1):
+                if np.mean(beta_differences) < least_difference:
+                    least_difference = np.mean(beta_differences)
+                    iter_num = 0
+                cur_betas = self.betas_WLR
+                self.beta_histories.append(self.betas_WLR)
+                self.beta_differences_histories.append(np.mean(beta_differences))
+            else:
+                break
+
+        return self.betas_WLR, np.mean(beta_differences)
 
 
     def plot_data(self, max_radius: float, gap: float, root: str = False) -> None:
