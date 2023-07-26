@@ -10,7 +10,7 @@ from copy import copy
 
 logging.getLogger().setLevel(logging.INFO)
 
-class WQEB:
+class WEB:
     def __init__(
             self, 
             start_radius: float = 0,
@@ -56,7 +56,7 @@ class WQEB:
 
         # hyperparameter 
         contained_group_num = int(in_group_num * contained_ratio_beta) 
-        self.mus = {group_name[idx]: val for idx, val in enumerate(np.array([[-6, 6]] * group_num))}
+        self.mus = {group_name[idx]: val for idx, val in enumerate(np.array([[-8, 8]] * group_num))}
         self.vs = {group_name[idx]: val for idx, val in enumerate([400] * group_num)}
         self.ss = {group_name[idx]: val for idx, val in enumerate([0.1] * group_num)}
 
@@ -83,7 +83,7 @@ class WQEB:
             counts = contained_group_num
             for sigma, lambda_ in zip(sigma_all, lambda_all):
                 if counts > 0:
-                    beta.append(multivariate_normal.rvs([-8, 8], sigma * lambda_ ** (-1) * np.eye(2)))
+                    beta.append(multivariate_normal.rvs([-1, 1], sigma * lambda_ ** (-1) * np.eye(2)))
                     counts -= 1
                 else:
                     beta.append(multivariate_normal.rvs(mu, sigma * lambda_ ** (-1) * np.eye(2)))
@@ -102,7 +102,7 @@ class WQEB:
                 data = multivariate_normal.rvs(X_tilde @ beta, sigma * np.diag(weight))
                 if contained_ratio_data > 0:
                     index = np.random.choice(np.arange(0, grid_num), int(grid_num * contained_ratio_data), replace=False)
-                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-4, 4]), sigma * np.diag(weight[index]))
+                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-5, 5]), sigma * np.diag(weight[index]))
                 else:
                     index = [] 
                 y_tilde.append(data)
