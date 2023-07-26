@@ -2,15 +2,15 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib import cbook, cm
+from matplotlib.colors import LightSource
+from matplotlib.patches import Ellipse
 from biopandas.pdb import PandasPdb
 from mrcfile import open as mrc_open
 from scipy.interpolate import RegularGridInterpolator
 from tqdm.auto import tqdm
-from itertools import filterfalse
-from scipy.stats import norm
 from collections import Counter
-from typing import List, Dict, Tuple, Optional
-from numba import njit
+from typing import List, Dict, Tuple
 
 
 def read_map(root: str) -> Tuple[np.ndarray]:
@@ -304,8 +304,7 @@ def plot_density(
         curr_times = 0
 
         for name in density_map: 
-            chosen_estimated_density_maps = list(map(lambda x: x[name], estimated_density_maps))
-            for times, elements in enumerate(zip(density_map[name], chosen_estimated_density_maps[0])):
+            for times, elements in enumerate(zip(density_map[name], estimated_density_maps[name])):
                 density, estimated_density = elements
                 i = (times + curr_times) // 5
                 j = (times + curr_times) % 5
@@ -351,3 +350,78 @@ def plot_density(
         fig.savefig(root)
 
     return
+
+
+def simulation_plot(data, zlabel, title, min_num=0, max_num=0.5):
+    font = {'weight' : 'bold', 'size': 10}
+    matplotlib.rc('font', **font)
+    z = data
+    nrows, ncols = z.shape
+    x = np.linspace(min_num, max_num, ncols)
+    y = np.linspace(min_num, max_num, nrows)
+    x, y = np.meshgrid(x, y)
+
+    mappable = plt.cm.ScalarMappable()
+    mappable.set_array(z)
+
+    # Set up plot
+    fig, ax = plt.subplots(subplot_kw=dict(projection='3d'), constrained_layout=True)
+
+    ls = LightSource(270, 45)
+    # To use a custom hillshading mode, override the built-in shading and pass
+    # in the rgb colors of the shaded surface calculated from "shade".
+    rgb = ls.shade(z, cmap=cm.gist_earth, vert_exag=0.1, blend_mode='overlay')
+    surf = ax.plot_surface(x, y, z, rstride=1, cstride=1, facecolors=rgb,
+                        linewidth=1, antialiased=False, shade=False,
+                        cmap=mappable.cmap, norm=mappable.norm)    
+    ax.set_xlabel("Contamination ratio of points")
+    ax.set_ylabel("Contamination ratio of betas")
+    ax.set_zlabel(zlabel, rotation=90)
+    ax.set_box_aspect(aspect=None, zoom=0.98)
+    ax.view_init(35, 260)
+    fig.tight_layout()
+    ax.set_title(title, y=1.0)
+    fig.colorbar(mappable)
+    plt.savefig("./figures/" + title)
+    plt.show()
+
+
+def plot_cov_ellipse(cov, pos, nstd=2, ax=None, **kwargs):
+    """
+    Plots an `nstd` sigma error ellipse based on the specified covariance
+    matrix (`cov`). Additional keyword arguments are passed on to the 
+    ellipse patch artist.
+
+    Parameters
+    ----------
+        cov : The 2x2 covariance matrix to base the ellipse on
+        pos : The location of the center of the ellipse. Expects a 2-element
+            sequence of [x0, y0].
+        nstd : The radius of the ellipse in numbers of standard deviations.
+            Defaults to 2 standard deviations.
+        ax : The axis that the ellipse will be plotted on. Defaults to the 
+            current axis.
+        Additional keyword arguments are pass on to the ellipse patch.
+
+    Returns
+    -------
+        A matplotlib ellipse artist
+    """
+    def eigsorted(cov):
+        vals, vecs = np.linalg.eigh(cov)
+        order = vals.argsort()[::-1]
+        return vals[order], vecs[:,order]
+
+    if ax is None:
+        ax = plt.gca()
+
+    vals, vecs = eigsorted(cov)
+    theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
+
+    # Width and height are "full" widths, not radius
+    width, height = 2 * np.sqrt(vals * nstd)
+    ellip = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
+    # ellip = Ellipse(xy=pos, width=sigma0[name], height=sigma1[name], angle=0, **kwargs)
+    ax.add_artist(ellip)
+    
+    return pos, width, height
