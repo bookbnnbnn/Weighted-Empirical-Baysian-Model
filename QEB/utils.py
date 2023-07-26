@@ -5,6 +5,9 @@ import matplotlib
 from matplotlib import cbook, cm
 from matplotlib.colors import LightSource
 from matplotlib.patches import Ellipse
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+import seaborn as sns
 from biopandas.pdb import PandasPdb
 from mrcfile import open as mrc_open
 from scipy.interpolate import RegularGridInterpolator
@@ -243,6 +246,154 @@ def density_mean(
 
     return radius_densities
 
+def simulation_plot(data, zlabel, title, min_num=0, max_num=0.5):
+    font = {'weight' : 'bold', 'size': 10}
+    matplotlib.rc('font', **font)
+    z = data
+    nrows, ncols = z.shape
+    x = np.linspace(min_num, max_num, ncols)
+    y = np.linspace(min_num, max_num, nrows)
+    x, y = np.meshgrid(x, y)
+
+    mappable = plt.cm.ScalarMappable()
+    mappable.set_array(z)
+
+    # Set up plot
+    fig, ax = plt.subplots(subplot_kw=dict(projection='3d'), constrained_layout=True)
+
+    ls = LightSource(270, 45)
+    # To use a custom hillshading mode, override the built-in shading and pass
+    # in the rgb colors of the shaded surface calculated from "shade".
+    rgb = ls.shade(z, cmap=cm.gist_earth, vert_exag=0.1, blend_mode='overlay')
+    surf = ax.plot_surface(x, y, z, rstride=1, cstride=1, facecolors=rgb,
+                        linewidth=1, antialiased=False, shade=False,
+                        cmap=mappable.cmap, norm=mappable.norm)    
+    ax.set_xlabel("Contamination ratio of points")
+    ax.set_ylabel("Contamination ratio of betas")
+    ax.set_zlabel(zlabel, rotation=90)
+    ax.set_box_aspect(aspect=None, zoom=0.98)
+    ax.view_init(35, 260)
+    fig.tight_layout()
+    ax.set_title(title, y=1.0)
+    fig.colorbar(mappable)
+    plt.savefig("./figures/" + title)
+    plt.show()
+
+
+def plot_cov_ellipse(cov, pos, nstd=2, ax=None, **kwargs):
+    """
+    Plots an `nstd` sigma error ellipse based on the specified covariance
+    matrix (`cov`). Additional keyword arguments are passed on to the 
+    ellipse patch artist.
+
+    Parameters
+    ----------
+        cov : The 2x2 covariance matrix to base the ellipse on
+        pos : The location of the center of the ellipse. Expects a 2-element
+            sequence of [x0, y0].
+        nstd : The radius of the ellipse in numbers of standard deviations.
+            Defaults to 2 standard deviations.
+        ax : The axis that the ellipse will be plotted on. Defaults to the 
+            current axis.
+        Additional keyword arguments are pass on to the ellipse patch.
+
+    Returns
+    -------
+        A matplotlib ellipse artist
+    """
+    def eigsorted(cov):
+        vals, vecs = np.linalg.eigh(cov)
+        order = vals.argsort()[::-1]
+        return vals[order], vecs[:,order]
+
+    if ax is None:
+        ax = plt.gca()
+
+    vals, vecs = eigsorted(cov)
+    theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
+
+    # Width and height are "full" widths, not radius
+    width, height = 2 * np.sqrt(vals * nstd)
+    ellip = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
+    # ellip = Ellipse(xy=pos, width=sigma0[name], height=sigma1[name], angle=0, **kwargs)
+    ax.add_artist(ellip)
+    
+    return pos, width, height
+
+
+def sub_plots(
+        custom_plot,
+        data,
+        x_label, 
+        y_label,
+        fontsize: int = 15, 
+        plot_dim: tuple = (2, 2),
+        figsize: tuple = (16, 12),
+        sharex=False, 
+        sharey=False,
+        legend=None,
+        root=None,
+        **kwargs):
+    font = {'weight' : 'bold', 'size':fontsize}
+    matplotlib.rc('font', **font)
+    times = 0
+    fig, axes = plt.subplots(*plot_dim, figsize=figsize, squeeze=False, sharex=sharex, sharey=sharey)
+    for name in data:
+        i = times // plot_dim[1]
+        j = times % plot_dim[1]
+        custom_plot(axes[i][j], name, data, **kwargs)
+        times += 1
+    fig.tight_layout(rect=[0.04, 0.09, 1, 0.95])
+    fig.supxlabel(x_label, fontsize=30)
+    fig.supylabel(y_label, fontsize=30)
+    if legend is not None:
+        if "handles" not in legend and "labels" not in legend:
+            labels_handles = {label: handle for ax in fig.axes for handle, label in zip(*ax.get_legend_handles_labels())}
+            fig.legend(handles=labels_handles.values(), labels=labels_handles.keys(), **legend)
+        else:
+            fig.legend(**legend)
+    if root is not None:
+        fig.savefig(root)
+
+
+def distance_hist(ax, name, outliers, statistic_distances, margin):
+    normal_index = ~np.isin(np.arange(0, len(statistic_distances[name])), outliers[name])
+    log_distance = np.log(np.array(statistic_distances[name]))
+    sns.histplot(log_distance[normal_index], bins=np.arange(min(log_distance) - 0.3, max(log_distance) + 0.3, 0.2), label=f"Normal ({sum(normal_index)})", ax=ax)
+    sns.histplot(log_distance[outliers[name]], bins=np.arange(min(log_distance) - 0.3, max(log_distance) + 0.3, 0.2), label=f"Outliers ({len(outliers[name])})", ax=ax, color="#ff7f0e")
+    ax.axvline(x=np.log(margin), color = 'red', label = 'critical value', linestyle = '--')
+    ax.text(0.9, 0.6, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes, fontsize = 25)
+    ax.set(ylabel='')
+    ax.legend(loc="upper right")
+
+
+def confidence_region_plot(ax, name, outliers, statistic_distances, betas_WEB, sigmas, mus_mle, margin):
+    normal_index = ~np.isin(np.arange(0, len(statistic_distances[name])), outliers[name])
+    ax.plot(betas_WEB[name][normal_index][:, 0], betas_WEB[name][normal_index][:, 1], 'ro', c='blue')
+    ax.plot(betas_WEB[name][outliers[name]][:, 0], betas_WEB[name][outliers[name]][:, 1], 'ro', c='#ff7f0e')
+    pos, width, height = plot_cov_ellipse(sigmas[name], mus_mle[name], nstd=margin, ax=ax, alpha=0.5, color='green')
+    ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes, fontsize = 25)
+
+
+def outliers_density_plot(ax, name, densities_data, densities_mle, densities_outliers, max_radius, gap):
+    x = np.arange(0, max_radius + gap, gap)
+    for density in densities_data[name]:
+        ax.plot(x, density[:len(x)], alpha=0.3, c="orange", label="map")
+    if name in densities_outliers:
+        for density_outliers in densities_outliers[name]:
+            ax.plot(x, density_outliers[:len(x)], alpha=1, c="green", label="outliers")
+    ax.plot(x, densities_mle[name][:len(x)], label="MLE", linestyle="--", c="blue", linewidth=3)
+    ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
+
+
+def density_plot(ax, name, densities_data, max_radius, gap):
+    x = np.arange(0, max_radius + gap, gap)
+    for density in densities_data[name]:
+        ax.plot(x, density[:len(x)], linewidth=3, alpha=0.3, label="map")
+    ax.text(0.8, 0.8, f"{name} \n ({len(densities_data[name])})", horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
+    ax.axvline(x=1, color = 'red', label = 'unit radius', linestyle = '--')
+    
+
 def plot_density(
     density_map: Dict,
     estimated_density_maps: List,
@@ -350,78 +501,3 @@ def plot_density(
         fig.savefig(root)
 
     return
-
-
-def simulation_plot(data, zlabel, title, min_num=0, max_num=0.5):
-    font = {'weight' : 'bold', 'size': 10}
-    matplotlib.rc('font', **font)
-    z = data
-    nrows, ncols = z.shape
-    x = np.linspace(min_num, max_num, ncols)
-    y = np.linspace(min_num, max_num, nrows)
-    x, y = np.meshgrid(x, y)
-
-    mappable = plt.cm.ScalarMappable()
-    mappable.set_array(z)
-
-    # Set up plot
-    fig, ax = plt.subplots(subplot_kw=dict(projection='3d'), constrained_layout=True)
-
-    ls = LightSource(270, 45)
-    # To use a custom hillshading mode, override the built-in shading and pass
-    # in the rgb colors of the shaded surface calculated from "shade".
-    rgb = ls.shade(z, cmap=cm.gist_earth, vert_exag=0.1, blend_mode='overlay')
-    surf = ax.plot_surface(x, y, z, rstride=1, cstride=1, facecolors=rgb,
-                        linewidth=1, antialiased=False, shade=False,
-                        cmap=mappable.cmap, norm=mappable.norm)    
-    ax.set_xlabel("Contamination ratio of points")
-    ax.set_ylabel("Contamination ratio of betas")
-    ax.set_zlabel(zlabel, rotation=90)
-    ax.set_box_aspect(aspect=None, zoom=0.98)
-    ax.view_init(35, 260)
-    fig.tight_layout()
-    ax.set_title(title, y=1.0)
-    fig.colorbar(mappable)
-    plt.savefig("./figures/" + title)
-    plt.show()
-
-
-def plot_cov_ellipse(cov, pos, nstd=2, ax=None, **kwargs):
-    """
-    Plots an `nstd` sigma error ellipse based on the specified covariance
-    matrix (`cov`). Additional keyword arguments are passed on to the 
-    ellipse patch artist.
-
-    Parameters
-    ----------
-        cov : The 2x2 covariance matrix to base the ellipse on
-        pos : The location of the center of the ellipse. Expects a 2-element
-            sequence of [x0, y0].
-        nstd : The radius of the ellipse in numbers of standard deviations.
-            Defaults to 2 standard deviations.
-        ax : The axis that the ellipse will be plotted on. Defaults to the 
-            current axis.
-        Additional keyword arguments are pass on to the ellipse patch.
-
-    Returns
-    -------
-        A matplotlib ellipse artist
-    """
-    def eigsorted(cov):
-        vals, vecs = np.linalg.eigh(cov)
-        order = vals.argsort()[::-1]
-        return vals[order], vecs[:,order]
-
-    if ax is None:
-        ax = plt.gca()
-
-    vals, vecs = eigsorted(cov)
-    theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
-
-    # Width and height are "full" widths, not radius
-    width, height = 2 * np.sqrt(vals * nstd)
-    ellip = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
-    # ellip = Ellipse(xy=pos, width=sigma0[name], height=sigma1[name], angle=0, **kwargs)
-    ax.add_artist(ellip)
-    
-    return pos, width, height
