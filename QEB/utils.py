@@ -375,8 +375,8 @@ def confidence_region_plot(ax, name, outliers, statistic_distances, betas_WEB, s
     ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes, fontsize = 25)
 
 
-def outliers_density_plot(ax, name, densities_data, densities_mle, densities_outliers, max_radius, gap):
-    x = np.arange(0, max_radius + gap, gap)
+def outliers_density_plot(ax, name, densities_data, densities_mle, densities_outliers, start_radius, max_radius, gap):
+    x = np.arange(start_radius, max_radius + gap, gap)
     for density in densities_data[name]:
         ax.plot(x, density[:len(x)], alpha=0.3, c="orange", label="map")
     if name in densities_outliers:
@@ -386,8 +386,8 @@ def outliers_density_plot(ax, name, densities_data, densities_mle, densities_out
     ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
 
 
-def density_plot(ax, name, densities_data, max_radius, gap):
-    x = np.arange(0, max_radius + gap, gap)
+def density_plot(ax, name, densities_data, start_radius, max_radius, gap):
+    x = np.arange(start_radius, max_radius + gap, gap)
     for density in densities_data[name]:
         ax.plot(x, density[:len(x)], linewidth=3, alpha=0.3, label="map")
     ax.text(0.8, 0.8, f"{name} \n ({len(densities_data[name])})", horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
