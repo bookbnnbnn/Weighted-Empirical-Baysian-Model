@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import invgamma, multivariate_normal
+from scipy.stats import invgamma, multivariate_normal, chi2
 import random
 import logging
 from typing import List, Dict, Tuple, Optional
@@ -276,7 +276,7 @@ class WQEB:
             
         self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
 
-        return self.betas_WEB, self.beta_differences_histories[name]
+        return self.betas_WEB, self.beta_differences_histories
     
 
     def WLR_iter(self, 
@@ -430,3 +430,43 @@ class WQEB:
                     estimators, 
                     colors[: len(estimators)], 
                     root=root)
+        
+        
+    def find_outliers(self, prob: float = 0.9973) -> Tuple[Dict[str, List[int]], Dict[str, np.ndarray]]:
+        self.outliers = {}
+        self.densities_outliers = {}
+        self.statistic_distances0 = {}
+        self.statistic_distances1 = {}
+        self.statistic_distances = {}
+        self.sigmas = {}
+        self.margin = chi2.ppf(prob, df=2)
+        for name in self.betas_WEB:
+            self.outliers[name] = []
+            self.densities_outliers[name] = []
+            self.statistic_distances0[name] = np.array([]) 
+            self.statistic_distances1[name] = np.array([]) 
+            self.statistic_distances[name] = np.array([]) 
+            mean = self.mus_mle[name]
+            betas = self.betas_WEB[name]
+            lambdas = self.lambdas[name]
+            sigma0 = np.sum([lambdas[i] * (betas - mean)[i][0] ** 2 for i in range(len(betas))]) / sum(lambdas)
+            sigma1 = np.sum([lambdas[i] * (betas - mean)[i][1] ** 2 for i in range(len(betas))]) / sum(lambdas)
+            sigma01 = np.sum([lambdas[i] * (betas - mean)[i][0] * (betas - mean)[i][1] for i in range(len(betas))]) / sum(lambdas)
+            self.sigmas[name] = np.array([sigma0, sigma01, sigma01, sigma1]).reshape(2, 2)
+
+            for i in range(len(betas)):
+                statistic_distance0 = (betas - mean)[i][0] ** 2 / sigma0
+                statistic_distance1 = (betas - mean)[i][1] ** 2 / sigma1
+                
+                self.statistic_distances0[name] = np.append(self.statistic_distances0[name], statistic_distance0)
+                self.statistic_distances1[name] = np.append(self.statistic_distances1[name], statistic_distance1)
+
+                statistic_distance = ((betas - mean)[i]).T @np.linalg.inv(self.sigmas[name]) @ (betas - mean)[i]
+                self.statistic_distances[name] = np.append(self.statistic_distances[name], statistic_distance)
+
+                if (statistic_distance) > self.margin:
+                    self.outliers[name].append(i)
+                    self.densities_outliers[name].append(self.densities_data[name][i])
+        
+        return self.outliers, self.statistic_distances
+
