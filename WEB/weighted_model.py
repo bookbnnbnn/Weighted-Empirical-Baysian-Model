@@ -33,7 +33,7 @@ class WEB:
         """
         Function to create data for the model.
 
-        Params
+        Parameters
         ----------
         group_num: int
             Number of groups.
@@ -56,7 +56,7 @@ class WEB:
 
         # hyperparameter 
         contained_group_num = int(in_group_num * contained_ratio_beta) 
-        self.mus = {group_name[idx]: val for idx, val in enumerate(np.array([[-8, 8]] * group_num))}
+        self.mus = {group_name[idx]: val for idx, val in enumerate(np.array([[-6, 6]] * group_num))}
         self.vs = {group_name[idx]: val for idx, val in enumerate([400] * group_num)}
         self.ss = {group_name[idx]: val for idx, val in enumerate([0.1] * group_num)}
 
@@ -83,7 +83,7 @@ class WEB:
             counts = contained_group_num
             for sigma, lambda_ in zip(sigma_all, lambda_all):
                 if counts > 0:
-                    beta.append(multivariate_normal.rvs([-1, 1], sigma * lambda_ ** (-1) * np.eye(2)))
+                    beta.append(multivariate_normal.rvs([-8, 8], sigma * lambda_ ** (-1) * np.eye(2)))
                     counts -= 1
                 else:
                     beta.append(multivariate_normal.rvs(mu, sigma * lambda_ ** (-1) * np.eye(2)))
@@ -102,7 +102,7 @@ class WEB:
                 data = multivariate_normal.rvs(X_tilde @ beta, sigma * np.diag(weight))
                 if contained_ratio_data > 0:
                     index = np.random.choice(np.arange(0, grid_num), int(grid_num * contained_ratio_data), replace=False)
-                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-5, 5]), sigma * np.diag(weight[index]))
+                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-4, 4]), sigma * np.diag(weight[index]))
                 else:
                     index = [] 
                 y_tilde.append(data)
@@ -128,7 +128,7 @@ class WEB:
         Reads map and pdb files, generates grid points, interpolates data, and returns the log values of the
         interpolated data for each atom type.
 
-        Params
+        Parameters
         ----------
         root_map: str 
             Path to the map file.
@@ -204,7 +204,7 @@ class WEB:
         """
         Runs the iterative algorithm to estimate parameters.
 
-        Params
+        Parameters
         ----------
         max_iter: int
             Maximum number of iterations.
@@ -286,7 +286,7 @@ class WEB:
         """
         Runs the iterative algorithm to estimate parameters.
 
-        Params
+        Parameters
         ----------
         max_iter: int
             Maximum number of iterations.
@@ -352,22 +352,69 @@ class WEB:
         return self.betas_WLR
 
 
-    def plot_data(
-            self, 
-            root: str = False, 
-            estimators: List[str] = ["WEB MLE", "WEB Mean-E", "Map Mean", "WEB-E Mean", "WEB-E W-Mean"]
-            ) -> None:
+    def fitted_densities_plot(self, root: Optional[str] = None):
         """
-        Plot the data densities.
+        Plot the fitted density distributions of data points using the WEB method.
 
-        Params
+        Parameters
         ----------
-        root: str = None
-            The root where you want to save the figure.
+        root : str, optional
+            The file path to save the plot, by default None.
 
         Returns
+        -------
+        None
+        """
+
+        fitted_densities = caculate_density(self.distances_to_center, self.betas_WEB, separated=True)
+        separated_densities = {f"{key}_{num + 1}": [density] for key, value in self.densities_data.items() for num, density in enumerate(value)}
+        separated_fitted_densities = {f"{key}_{num + 1}": density for key, value in fitted_densities.items() for num, density in enumerate(value)}
+
+        legend = {
+        "loc": "lower left",
+        "bbox_to_anchor": (0.2, 0.025),
+        "bbox_transform": plt.gcf().transFigure,
+        "ncol": 2
+        }
+        plot_row = len(separated_densities) // 5 if len(separated_densities) % 5 == 0 else len(separated_densities) // 5 + 1
+
+        sub_plots(
+            fitted_density_plot, 
+            separated_densities, 
+            x_label = "Radius",
+            y_label = "Voxel Value", 
+            fontsize = 25,
+            plot_dim = (plot_row , 5),
+            figsize = (25, plot_row * 4),
+            sharex=True, 
+            sharey=True,
+            legend=legend,
+            root=root,
+            estimated_densities=[separated_fitted_densities],
+            start_radius=self.start_radius,
+            max_radius=self.max_radius, 
+            gap=self.gap,
+            labels=["WEB"],
+            colors=["blue"],
+            )
+
+
+    def representative_densities_plot(self, 
+            root: Optional[str] = None, 
+            estimators: List[str] = ["WEB MLE", "WEB Mean-E", "Map Mean", "WEB-E Mean", "WEB-E W-Mean"]):
+        """
+        Plot the representative density distributions of data points using different estimators.
+
+        Parameters
         ----------
-            None
+        root : str, optional
+            The file path to save the plot, by default None.
+        estimators : List[str], optional
+            List of estimator names to plot, by default ["WEB MLE", "WEB Mean-E", "Map Mean", "WEB-E Mean", "WEB-E W-Mean"].
+
+        Returns
+        -------
+        None
         """
 
         estimated_densities = []
@@ -407,19 +454,50 @@ class WEB:
             estimated_densities.append(self.densities_EB)
 
         colors = ["blue", "black", "green", "purple", "gray", "red"]
-        
-        # Plot the densities
-        plot_density(self.densities_data, 
-                    estimated_densities, 
-                    self.start_radius, 
-                    self.max_radius, 
-                    self.gap, 
-                    estimators, 
-                    colors[: len(estimators)], 
-                    root=root)
+
+        legend = {
+        "loc": "lower center",
+        "bbox_to_anchor": (1.5, 0.1),
+        "bbox_transform": plt.gcf().transFigure,
+        "ncol": len(estimators)
+        }
+
+        sub_plots(
+            fitted_density_plot, 
+            self.densities_data, 
+            x_label = "Radius",
+            y_label = "Voxel Value", 
+            fontsize = 25,
+            plot_dim = (4, 5),
+            figsize = (25, 16),
+            sharex=True, 
+            sharey=True,
+            legend=legend,
+            root=root,
+            estimated_densities=estimated_densities,
+            start_radius=self.start_radius,
+            max_radius=self.max_radius, 
+            gap=self.gap,
+            labels=estimators,
+            colors=colors[: len(estimators)],
+            )
         
         
     def find_outliers(self, prob: float = 0.9973) -> Tuple[Dict[str, List[int]], Dict[str, np.ndarray]]:
+        """
+        Find outliers in the data using the weighted empirical Bayesian method.
+
+        Parameters
+        ----------
+        prob : float, optional
+            The probability value for the chi-square distribution to determine outliers, by default 0.9973.
+
+        Returns
+        -------
+        Tuple[Dict[str, List[int]], Dict[str, np.ndarray]]
+            A tuple containing dictionaries of outliers and statistical distances for each amino acid.
+        """
+
         self.outliers = {}
         self.densities_outliers = {}
         self.statistic_distances0 = {}
@@ -459,7 +537,20 @@ class WEB:
         return self.outliers, self.statistic_distances
     
 
-    def distances_hist(self, root=None):
+    def distances_hist(self, root: Optional[str] = None) -> None:
+        """
+        Plot the histogram of log statistical distances for weighted empirical Bayesian analysis.
+
+        Parameters
+        ----------
+        root : Optional[str], optional
+            The root where you want to save the figure, by default None.
+
+        Returns
+        -------
+        None
+        """
+
         sub_plots(
             distance_hist, 
             self.outliers, 
@@ -472,7 +563,20 @@ class WEB:
             margin = self.margin
             )
         
-    def confidence_regions_plot(self, root=None):
+    def confidence_regions_plot(self, root: Optional[str] = None):
+        """
+        Plot confidence regions for normal and outlier data points.
+
+        Parameters
+        ----------
+        root : str, optional
+            The file path to save the plot, by default None.
+
+        Returns
+        -------
+        None
+        """
+
         point_n = Line2D([0], [0], label='Normal', marker='o', markersize=10, markeredgecolor='blue', markerfacecolor='blue', linestyle='')
         point_o = Line2D([0], [0], label='Outliers', marker='o', markersize=10, markeredgecolor='red', markerfacecolor='#ff7f0e', linestyle='')
         green_patch = Patch(color='g', label='Confidence Region', alpha=0.5)
@@ -498,7 +602,20 @@ class WEB:
             margin = self.margin
             )
     
-    def outliers_density_plot(self, root=None):
+    def outliers_density_plot(self, root: Optional[str] = None):
+        """
+        Plot the density distributions of normal and outlier data points.
+
+        Parameters
+        ----------
+        root : str, optional
+            The file path to save the plot, by default None.
+
+        Returns
+        -------
+        None
+        """
+
         legend = {
         "loc": "lower center",
         "bbox_to_anchor": (1.5, 0.1),
@@ -525,7 +642,19 @@ class WEB:
             gap=self.gap
             )
         
-    def densities_plot(self, root=None):
+    def densities_plot(self, root: Optional[str] = None):
+        """
+        Plot the density distributions of data points.
+
+        Parameters
+        ----------
+        root : str, optional
+            The file path to save the plot, by default None.
+
+        Returns
+        -------
+        None
+        """
 
         sub_plots(
             density_plot, 
