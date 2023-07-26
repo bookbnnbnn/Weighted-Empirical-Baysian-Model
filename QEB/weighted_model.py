@@ -11,10 +11,19 @@ from copy import copy
 logging.getLogger().setLevel(logging.INFO)
 
 class WQEB:
+    def __init__(
+            self, 
+            start_radius: float = 0,
+            max_radius: float = 1,
+            gap: float = 0.2,
+            ) -> None:
+        
+        self.start_radius = start_radius
+        self.max_radius = max_radius
+        self.gap = gap
+
+
     def create_data(self, 
-                    start_rad: float = 0,
-                    max_rad: float = 1,
-                    gap: float = 0.2,
                     group_num: int = 5,
                     group_name: list = ["A", "B", "C", "D", "E"], 
                     in_group_num: int = 6,
@@ -26,12 +35,6 @@ class WQEB:
 
         Params
         ----------
-        start_rad: float = 0
-            Minimum radius for generating grid points. 
-        max_rad: float = 1
-            Maximum radius for generating grid points. 
-        gap: float = 0.2
-            Gap between radii for generating grid points. 
         group_num: int
             Number of groups.
         group_name: list
@@ -58,7 +61,7 @@ class WQEB:
         self.ss = {group_name[idx]: val for idx, val in enumerate([0.1] * group_num)}
 
         # grid points
-        distances_to_center = np.repeat(np.arange(start_rad, max_rad + gap, gap), 100)
+        distances_to_center = np.repeat(np.arange(self.start_radius, self.max_radius + self.gap, self.gap), 100)
         grid_num = len(distances_to_center)
         X_tilde = [[np.concatenate((np.ones((grid_num, 1)), (-1/ 2 * distances_to_center ** 2).reshape(-1, 1)), axis=1).tolist()] * in_group_num]
         self.distances_to_center = {group_name[idx]: val for idx, val in enumerate(np.array([[distances_to_center]* in_group_num] * group_num))}
@@ -118,9 +121,6 @@ class WQEB:
             root_map: str,
             root_pdb: str,
             atomic: Optional[str] = None,
-            start_rad: float = 0,
-            max_rad: float = 1,
-            gap: float = 0.2,
             max_points: int = 100,
             base_num_points: int = 4,
     ) -> Dict[str, np.ndarray]:
@@ -136,12 +136,6 @@ class WQEB:
             Path to the pdb file.
         atomic: Optional[str]
             Atom type to filter by. Defaults to None.
-        start_rad: float = 0 
-            Minimum radius for generating grid points. 
-        max_rad: float = 1
-            Maximum radius for generating grid points. 
-        gap: float = 0.2
-            Gap between radii for generating grid points. 
         max_points: int = 100
             Maximum number of points to generate at each radius. 
         base_num_points: int = 4
@@ -159,7 +153,7 @@ class WQEB:
         residue_names = np.array(df_processed["residue_name"])
         atom_points = np.column_stack((df_processed.x_coord, df_processed.y_coord, df_processed.z_coord))
         self.grid_points, self.distances_to_center, self.Xs_tilde = generate_grid_points(
-            atom_points, residue_names, start_rad, max_rad, gap, max_points, base_num_points)
+            atom_points, residue_names, self.start_radius, self.max_radius, self.gap, max_points, base_num_points)
         self.interp_func = interpolator(data, grid_size, origin)
         self.data = {key: self.interp_func(grid_points) for key, grid_points in self.grid_points.items()}
         self.data_log = {key: np.log(value + 1e-35) for key, value in self.data.items()}
@@ -198,13 +192,14 @@ class WQEB:
 
         return self.mus_initial, self.sigmas_initial, self.betas_initial
 
-    def WEB_iter(self, 
-                       max_iter: int = 3, 
-                       alpha: float = 0.1, 
-                       gamma: float = 0.1, 
-                       tol: float = 1e-4, 
-                       patience: int = 3, 
-                       verbose: int = 1, 
+    def WEB_iter(
+            self, 
+            max_iter: int = 3, 
+            alpha: float = 0.1, 
+            gamma: float = 0.1, 
+            tol: float = 1e-4, 
+            patience: int = 3, 
+            verbose: int = 1, 
     ) -> Tuple[Dict[str, np.ndarray], float]:
         """
         Runs the iterative algorithm to estimate parameters.
@@ -279,13 +274,14 @@ class WQEB:
         return self.betas_WEB, self.beta_differences_histories
     
 
-    def WLR_iter(self, 
-                       max_iter: int = 3, 
-                       alpha: float = 0.1, 
-                       gamma: float = 0.1, 
-                       tol: float = 1e-4, 
-                       patience: int = 3, 
-                       verbose: int = 1
+    def WLR_iter(
+            self, 
+            max_iter: int = 3, 
+            alpha: float = 0.1, 
+            gamma: float = 0.1, 
+            tol: float = 1e-4, 
+            patience: int = 3, 
+            verbose: int = 1
     ) -> Tuple[Dict[str, np.ndarray], float]:
         """
         Runs the iterative algorithm to estimate parameters.
@@ -358,9 +354,6 @@ class WQEB:
 
     def plot_data(
             self, 
-            start_radius: float, 
-            max_radius: float, 
-            gap: float, 
             root: str = False, 
             estimators: List[str] = ["WEB MLE", "WEB Mean-E", "Map Mean", "WEB-E Mean", "WEB-E W-Mean"]
             ) -> None:
@@ -369,12 +362,6 @@ class WQEB:
 
         Params
         ----------
-        start_radius: float
-            Minimum radius for the plot.
-        max_radius: float
-            Maximum radius for the plot.
-        gap: float
-            Gap between the grid points.
         root: str = None
             The root where you want to save the figure.
 
@@ -424,9 +411,9 @@ class WQEB:
         # Plot the densities
         plot_density(self.densities_data, 
                     estimated_densities, 
-                    start_radius, 
-                    max_radius, 
-                    gap, 
+                    self.start_radius, 
+                    self.max_radius, 
+                    self.gap, 
                     estimators, 
                     colors[: len(estimators)], 
                     root=root)
@@ -533,8 +520,9 @@ class WQEB:
             root=root,
             densities_mle = self.densities_mle,
             densities_outliers = self.densities_outliers,
-            max_radius = 1, 
-            gap = 0.2
+            start_radius=self.start_radius,
+            max_radius=self.max_radius, 
+            gap=self.gap
             )
         
     def densities_plot(self, root=None):
@@ -550,8 +538,9 @@ class WQEB:
             sharex=True, 
             sharey=True,
             root=root,
-            max_radius = 1, 
-            gap = 0.2
+            start_radius=self.start_radius,
+            max_radius=self.max_radius, 
+            gap=self.gap
             )
 
     
