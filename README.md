@@ -74,6 +74,8 @@ web.outliers_density_plot()
 The package includes two Jupyter Notebook examples demonstrating how to use the WEB model with real data and simulation data:
 
 `Instance_real_data.ipynb`: Example using real data from map and pdb files.
+
+
 `Instance_simulation.ipynb`: Example using synthetic data generated from the model.
 
 ## License
