@@ -3,4 +3,5 @@ experiment
 *.pyc
 *dataset
 *document
+*figures
 .DS_Store
