@@ -11,7 +11,7 @@ import seaborn as sns
 from biopandas.pdb import PandasPdb
 from mrcfile import open as mrc_open
 from scipy.interpolate import RegularGridInterpolator
-from tqdm.auto import tqdm
+from tqdm import tqdm
 from collections import Counter
 from typing import List, Dict, Tuple
 
@@ -369,8 +369,8 @@ def distance_hist(ax, name, outliers, statistic_distances, margin):
 
 def confidence_region_plot(ax, name, outliers, statistic_distances, betas_WEB, sigmas, mus_mle, margin):
     normal_index = ~np.isin(np.arange(0, len(statistic_distances[name])), outliers[name])
-    ax.plot(betas_WEB[name][normal_index][:, 0], betas_WEB[name][normal_index][:, 1], 'ro', c='blue')
-    ax.plot(betas_WEB[name][outliers[name]][:, 0], betas_WEB[name][outliers[name]][:, 1], 'ro', c='#ff7f0e')
+    ax.scatter(betas_WEB[name][normal_index][:, 0], betas_WEB[name][normal_index][:, 1], color='blue')
+    ax.scatter(betas_WEB[name][outliers[name]][:, 0], betas_WEB[name][outliers[name]][:, 1], color='#ff7f0e')
     pos, width, height = plot_cov_ellipse(sigmas[name], mus_mle[name], nstd=margin, ax=ax, alpha=0.5, color='green')
     ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes, fontsize = 25)
 
@@ -493,7 +493,6 @@ def plot_density(
     fig.supylabel('Voxel Value')
 
     # Adjust plot layout
-    plt.tight_layout()
     fig.tight_layout(rect=(0.025, 0.03, 1, 1))
 
     # Save the figure if specified
