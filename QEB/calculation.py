@@ -126,10 +126,10 @@ def caculate_mus_mle(
         sigma_tilde_matrix = np.linalg.inv(XWX + lambda_ * np.eye(2))
 
         # Calulate the denominator and numerator to get mus MLE
-        denominator = lambda_ / sigma * (np.eye(2) - sigma_tilde_matrix * lambda_)
-        numerator = lambda_ / sigma * sigma_tilde_matrix @ XWY
-        denominators[idx] = denominator
-        numerators[idx] = numerator
+        weight = lambda_ / sigma * sigma_tilde_matrix @ XWX
+
+        denominators[idx] = weight
+        numerators[idx] = weight @ np.linalg.inv(XWX) @ XWY
 
     return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
 
@@ -304,7 +304,8 @@ def caculate_points(Xs_tilde: np.ndarray, betas_em: np.ndarray) -> np.ndarray:
 
 def caculate_density(
     distances_to_center: np.ndarray,
-    betas: np.ndarray
+    betas: np.ndarray,
+    seperated: bool = False
 ) -> np.ndarray:
     """
     Calculates the densities using the given distances to center and betas.
@@ -315,6 +316,8 @@ def caculate_density(
         distances to center arrays.
     betas: np.ndarray
         beta arrays.
+    seperated: bool = False
+        Flag indicating whether densities are being calculated for each group seperately.
 
     Returns
     ----------
@@ -329,7 +332,13 @@ def caculate_density(
     for name in distances_to_center:
         distance_to_center = np.unique(distances_to_center[name][0])
         X_tilde = np.array([np.ones(len(distance_to_center)), -1 / 2 * distance_to_center**2])
-        densities[name] = np.exp(X_tilde.T @ betas[name])
+        if seperated:
+            density = []
+            for i in range(len(betas[name])):
+                density.append(np.exp(X_tilde.T @ betas[name][i]))
+            densities[name] = np.array(density)
+        else:
+            densities[name] = np.exp(X_tilde.T @ betas[name])
 
     return densities
 
