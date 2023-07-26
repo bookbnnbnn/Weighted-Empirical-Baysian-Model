@@ -198,13 +198,13 @@ class WQEB:
 
         return self.mus_initial, self.sigmas_initial, self.betas_initial
 
-    def algorithm_iter(self, 
+    def WEB_iter(self, 
                        max_iter: int = 3, 
                        alpha: float = 0.1, 
                        gamma: float = 0.1, 
                        tol: float = 1e-4, 
                        patience: int = 3, 
-                       verbose: int = 1
+                       verbose: int = 1, 
     ) -> Tuple[Dict[str, np.ndarray], float]:
         """
         Runs the iterative algorithm to estimate parameters.
@@ -271,6 +271,7 @@ class WQEB:
                 else:
                     self.betas_WEB[name] = cur_beta
                     break
+
             self.beta_differences_histories[name] = beta_differences_history
             
         self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
@@ -278,7 +279,7 @@ class WQEB:
         return self.betas_WEB, self.beta_differences_histories[name]
     
 
-    def weighted_linear_iter(self, 
+    def WLR_iter(self, 
                        max_iter: int = 3, 
                        alpha: float = 0.1, 
                        gamma: float = 0.1, 
@@ -355,12 +356,21 @@ class WQEB:
         return self.betas_WLR
 
 
-    def plot_data(self, max_radius: float, gap: float, root: str = False) -> None:
+    def plot_data(
+            self, 
+            start_radius: float, 
+            max_radius: float, 
+            gap: float, 
+            root: str = False, 
+            estimators: List[str] = ["WEB MLE", "WEB Mean-E", "Map Mean", "WEB-E Mean", "WEB-E W-Mean"]
+            ) -> None:
         """
         Plot the data densities.
 
         Params
         ----------
+        start_radius: float
+            Minimum radius for the plot.
         max_radius: float
             Maximum radius for the plot.
         gap: float
@@ -373,19 +383,50 @@ class WQEB:
             None
         """
 
-        # Calculate mean betas using the estimated WEB betas
-        self.betas_em_mean = {name: np.mean(betas, axis=0) for name, betas in self.betas_WEB.items() if len(betas) > 0}
-        
-        # Calculate densities using estimated mean betas
-        self.densities_em = caculate_density(self.distances_to_center, self.betas_em_mean)
+        estimated_densities = []
 
-        self.densities_mean = {name: np.mean(densities, axis=0) for name, densities in self.densities_data.items()}
+        if "WEB MLE" in estimators:
+            estimated_densities.append(self.densities_mle)
+
+        # Calculate mean betas using the estimated WEB betas and do exponential transformation
+        if "WEB Mean-E" in estimators:
+            self.betas_EWEB = {name: np.mean(betas, axis=0) for name, betas in self.betas_WEB.items() if len(betas) > 0}
+            self.densities_EWEB_Mean = caculate_density(self.distances_to_center, self.betas_EWEB)
+            estimated_densities.append(self.densities_EWEB_Mean)
+
+        # Calculate mean densities of denstiy maps
+        if "Map Mean" in estimators:
+            self.densities_Mean = {name: np.mean(densities, axis=0) for name, densities in self.densities_data.items()}
+            estimated_densities.append(self.densities_Mean)
+
+        # Calculate mean of estimated WEB betas after exponential transformation
+        if "WEB-E Mean" in estimators:
+            self.densities_WEB = caculate_density(self.distances_to_center, self.betas_WEB, seperated=True)
+            self.densities_WEBE_Mean = {name: np.mean(density, axis=0) for name, density in self.densities_WEB.items()}
+            estimated_densities.append(self.densities_WEBE_Mean)
+
+        # Calculate mean of estimated WEB betas after exponential transformation with weights
+        if "WEB-E W-Mean" in estimators:
+            self.densities_WEB = caculate_density(self.distances_to_center, self.betas_WEB, seperated=True)
+            self.densities_WEBE_WMean = {name: np.sum(self.lambdas[name].reshape(-1, 1) * self.densities_WEB[name], axis=0) / np.sum(self.lambdas[name]) for name, density in self.densities_WEB.items()}
+            estimated_densities.append(self.densities_WEBE_WMean)
+
+        # Calculate empirical Bayes estimates
+        if "EB" in estimators:
+            self.mus_EB = {name: caculate_mus_mle(self.Xs_tilde[name], self.data_log[name], self.sigmas_median[name], 
+                                                    np.ones((len(self.Xs_tilde[name]), len(self.distances_to_center[name][0]))), np.ones(len(self.Xs_tilde[name]))) 
+                                                    for name in self.data_log}
+            self.densities_EB = caculate_density(self.distances_to_center, self.mus_EB)
+            estimated_densities.append(self.densities_EB)
+
+        colors = ["blue", "black", "green", "purple", "gray", "red"]
         
         # Plot the densities
         plot_density(self.densities_data, 
-                    [self.densities_mle, self.densities_em, self.densities_mean], 
+                    estimated_densities, 
+                    start_radius, 
                     max_radius, 
                     gap, 
-                    ["MLE", "WEB_Mean", "Mean"], 
-                    ["blue", "black", "red"], 
+                    estimators, 
+                    colors[: len(estimators)], 
                     root=root)
