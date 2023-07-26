@@ -37,7 +37,7 @@ def read_map(root: str) -> Tuple[np.ndarray]:
         data = mrc.data
     # Data need to transform since the shape of `map` file does not fit to `pdb` file
     data = np.einsum('zyx->xyz', data)
-    data = (data > 0) * data
+    data = (data >= 0) * data
     origin = np.array(header["origin"].item())
     grid_size = np.array(header["cella"].item()) / data.shape
     return data, grid_size, origin
@@ -61,11 +61,9 @@ def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
 
     ppdb = PandasPdb().read_pdb(root)
     df = ppdb.df['ATOM']
-    if atomic is not None:
-        df_chosen = df[df["atom_name"] == atomic] if atomic is not None else df
-        return df_chosen
-    else:
-        return df
+    new_df = df[df.groupby(["residue_number", "atom_name"])["alt_loc"].transform(min) == df["alt_loc"]]
+    df_chosen = new_df[new_df["atom_name"] == atomic] if atomic is not None else new_df
+    return df_chosen
     
 def generate_points_on_sphere(
         radius: float = 1, 
@@ -145,7 +143,6 @@ def generate_grid_points(
     Xs_tilde = {name: [] for name in unique_residue}
     
     for atomic_index in tqdm(range(residue_names.shape[0])):
-    # for atomic_index in tqdm(range(2000)):
         grid_points = {}
         name = residue_names[atomic_index]
         all_distances_to_center = []
@@ -192,9 +189,9 @@ def interpolator(
 
     """
     nx, ny, nz = data.shape[0], data.shape[1], data.shape[2]
-    x = np.linspace(0, nx - 1, nx) * grid_size[0] + origin[0]
-    y = np.linspace(0, ny - 1, ny) * grid_size[1] + origin[1]
-    z = np.linspace(0, nz - 1, nz) * grid_size[2] + origin[2]
+    x = np.linspace(0, nx - 1, nx) * grid_size[0] + origin[0] #- grid_size[0] / 2
+    y = np.linspace(0, ny - 1, ny) * grid_size[1] + origin[1] #- grid_size[1] / 2
+    z = np.linspace(0, nz - 1, nz) * grid_size[2] + origin[2] #- grid_size[2] / 2
     interp_func = RegularGridInterpolator((x, y, z), data)
     return interp_func
 
@@ -249,6 +246,7 @@ def density_mean(
 def plot_density(
     density_map: Dict,
     estimated_density_maps: List,
+    start_radius: float,
     max_radius: float,
     gap: float,
     labels: List,
@@ -266,6 +264,8 @@ def plot_density(
         Dictionary containing the density maps.
     estimated_density_maps: List
         List of dictionaries containing the estimated density maps.
+    start_radius: float
+        Minimum radius value.
     max_radius: float
         Maximum radius value.
     gap: float
@@ -296,7 +296,7 @@ def plot_density(
 
     # Create the subplots
     fig, axes = plt.subplots(nums, 5, figsize=(25, nums * 4), sharex=True, sharey=True, squeeze=False)
-    x = np.arange(0, max_radius + gap, gap)
+    x = np.arange(start_radius, max_radius + gap, gap)
     length = len(x)
 
     # Plot the density maps and estimated density maps separately
@@ -309,7 +309,7 @@ def plot_density(
                 density, estimated_density = elements
                 i = (times + curr_times) // 5
                 j = (times + curr_times) % 5
-                axes[i][j].plot(x, density[:length], linewidth=0.5, alpha=0.5, c="orange", label="map")
+                axes[i][j].plot(x, density[:length], linewidth=3, alpha=1, c="orange", label="map")
                 axes[i][j].plot(x, estimated_density[:length], label=labels[0], linestyle="--", c=colors[0], linewidth=3)
                 axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
             curr_times += (times + 1)
@@ -320,7 +320,7 @@ def plot_density(
             j = times % 5
             chosen_estimated_density_maps = list(map(lambda x: x[name], estimated_density_maps))
             for density in density_map[name]:
-                axes[i][j].plot(x, density[:length], linewidth=0.5, alpha=0.5, c="orange", label="map")
+                axes[i][j].plot(x, density[:length], linewidth=3, alpha=1, c="orange", label="map")
                 for idx, estimated_density in enumerate(chosen_estimated_density_maps):
                     axes[i][j].plot(x, estimated_density[:length], label=labels[idx], linestyle="--", c=colors[idx], linewidth=3)
             axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
@@ -332,10 +332,11 @@ def plot_density(
     labels_handles.values(),
     labels_handles.keys(),
     loc = "upper center",
-    bbox_to_anchor = (0.25, 0.1),
+    bbox_to_anchor = (0.5, 0.1),
     bbox_transform = plt.gcf().transFigure,
     ncol=len(labels) + 1
     )
+    
 
     # Set x-axis and y-axis labels
     fig.supxlabel('Radius')
