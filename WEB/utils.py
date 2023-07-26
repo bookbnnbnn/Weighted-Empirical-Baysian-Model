@@ -13,14 +13,14 @@ from mrcfile import open as mrc_open
 from scipy.interpolate import RegularGridInterpolator
 from tqdm import tqdm
 from collections import Counter
-from typing import List, Dict, Tuple
+from typing import Callable, Dict, Any, Optional, Tuple, List
 
 
 def read_map(root: str) -> Tuple[np.ndarray]:
     """
     Read the density map from `map` file
 
-    Params
+    Parameters
     ----------
     root: str
         The root of `map` data 
@@ -49,7 +49,7 @@ def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
     """
     Read atomic model from `pdb` file
 
-    Params
+    Parameters
     ----------
     root: str
         The root of `map` data 
@@ -78,7 +78,7 @@ def generate_points_on_sphere(
     """
     Construct the grid points, whose denses are equal on shpere for the specific radius from the center
 
-    Params
+    Parameters
     ----------
     radius: float
         The radius for the specific radius from the center
@@ -117,7 +117,7 @@ def generate_grid_points(
     """
     Generate grid points from each center that we chose from atomic model
 
-    Params
+    Parameters
     ----------
     df_processed: pd.DataFrame
         The processed dataframe 
@@ -177,7 +177,7 @@ def interpolator(
     """
     Interpolates 3D data on a regular grid.
 
-    Params
+    Parameters
     ----------
     data: np.ndarray
         3D array of data to be interpolated.
@@ -206,7 +206,7 @@ def density_mean(
     """
     Calculates the mean densities for each radius and returns the results.
 
-    Params
+    Parameters
     ----------
     data_list: List[Dict[str, np.ndarray]]
         List of dictionaries containing the data.
@@ -246,7 +246,28 @@ def density_mean(
 
     return radius_densities
 
-def simulation_plot(data, zlabel, title, min_num=0, max_num=0.5):
+def simulation_plot(data: np.ndarray, zlabel: str, title: str, min_num: float = 0, max_num: float = 0.5) -> None:
+    """
+    Plot a 3D surface plot for simulation data.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        2D array containing the simulation data.
+    zlabel : str
+        Label for the z-axis.
+    title : str
+        Title for the plot.
+    min_num : float, optional
+        Minimum value for the x and y axis, by default 0.
+    max_num : float, optional
+        Maximum value for the x and y axis, by default 0.5.
+
+    Returns
+    -------
+    None
+    """
+
     font = {'weight' : 'bold', 'size': 10}
     matplotlib.rc('font', **font)
     z = data
@@ -280,27 +301,27 @@ def simulation_plot(data, zlabel, title, min_num=0, max_num=0.5):
     plt.show()
 
 
-def plot_cov_ellipse(cov, pos, nstd=2, ax=None, **kwargs):
+def plot_cov_ellipse(cov: np.ndarray, pos: np.ndarray, nstd: float = 2, ax: plt.Axes = None, **kwargs) -> Tuple[np.ndarray, float, float]:
     """
-    Plots an `nstd` sigma error ellipse based on the specified covariance
-    matrix (`cov`). Additional keyword arguments are passed on to the 
-    ellipse patch artist.
+    Plot an ellipse based on the specified covariance matrix.
 
     Parameters
     ----------
-        cov : The 2x2 covariance matrix to base the ellipse on
-        pos : The location of the center of the ellipse. Expects a 2-element
-            sequence of [x0, y0].
-        nstd : The radius of the ellipse in numbers of standard deviations.
-            Defaults to 2 standard deviations.
-        ax : The axis that the ellipse will be plotted on. Defaults to the 
-            current axis.
-        Additional keyword arguments are pass on to the ellipse patch.
+    cov : np.ndarray
+        The 2x2 covariance matrix to base the ellipse on.
+    pos : np.ndarray
+        The location of the center of the ellipse. Expects a 2-element sequence of [x0, y0].
+    nstd : float, optional
+        The radius of the ellipse in numbers of standard deviations, by default 2.
+    ax : plt.Axes, optional
+        The axis that the ellipse will be plotted on, by default None.
 
     Returns
     -------
-        A matplotlib ellipse artist
+    Tuple[np.ndarray, float, float]
+        A tuple containing the position, width, and height of the ellipse.
     """
+    
     def eigsorted(cov):
         vals, vecs = np.linalg.eigh(cov)
         order = vals.argsort()[::-1]
@@ -315,25 +336,63 @@ def plot_cov_ellipse(cov, pos, nstd=2, ax=None, **kwargs):
     # Width and height are "full" widths, not radius
     width, height = 2 * np.sqrt(vals * nstd)
     ellip = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
-    # ellip = Ellipse(xy=pos, width=sigma0[name], height=sigma1[name], angle=0, **kwargs)
     ax.add_artist(ellip)
     
     return pos, width, height
 
 
 def sub_plots(
-        custom_plot,
-        data,
-        x_label, 
-        y_label,
-        fontsize: int = 15, 
-        plot_dim: tuple = (2, 2),
-        figsize: tuple = (16, 12),
-        sharex=False, 
-        sharey=False,
-        legend=None,
-        root=None,
-        **kwargs):
+        custom_plot: Callable[[plt.Axes, str, Dict[str, Any]], None],
+        data: Dict[str, Any],
+        x_label: str,
+        y_label: str,
+        fontsize: int = 15,
+        plot_dim: Tuple[int, int] = (2, 2),
+        figsize: Tuple[float, float] = (16, 12),
+        sharex: bool = False,
+        sharey: bool = False,
+        legend: Optional[Dict[str, Any]] = None,
+        root: Optional[str] = None,
+        **kwargs
+) -> None:
+    """
+    Create subplots with custom plotting function.
+
+    Parameters
+    ----------
+    custom_plot : Callable[[plt.Axes, str, Dict[str, Any]], None]
+        The custom plotting function to be applied on each subplot.
+        It should take three arguments: the subplot axis, the name of the data,
+        and the data itself.
+    data : Dict[str, Any]
+        Dictionary containing the data to be plotted. The keys represent the name
+        of the data, and the values represent the actual data.
+    x_label : str
+        The label for the x-axis of each subplot.
+    y_label : str
+        The label for the y-axis of each subplot.
+    fontsize : int, optional
+        The fontsize for the plot labels, by default 15.
+    plot_dim : Tuple[int, int], optional
+        The dimensions of the subplot grid, by default (2, 2).
+    figsize : Tuple[float, float], optional
+        The size of the entire figure in inches, by default (16, 12).
+    sharex : bool, optional
+        Whether to share the x-axis among subplots, by default False.
+    sharey : bool, optional
+        Whether to share the y-axis among subplots, by default False.
+    legend : Dict[str, Any], optional
+        A dictionary containing optional legend settings, by default None.
+    root : str, optional
+        The root path where the figure will be saved, by default None.
+    **kwargs
+        Additional keyword arguments to be passed to the custom_plot function.
+
+    Returns
+    -------
+    None
+    """
+
     font = {'weight' : 'bold', 'size':fontsize}
     matplotlib.rc('font', **font)
     times = 0
@@ -356,7 +415,34 @@ def sub_plots(
         fig.savefig(root)
 
 
-def distance_hist(ax, name, outliers, statistic_distances, margin):
+def distance_hist(
+    ax: plt.Axes,
+    name: str,
+    outliers: Dict[str, np.ndarray],
+    statistic_distances: Dict[str, np.ndarray],
+    margin: float
+) -> None:
+    """
+    Plot the histogram of distances with respect to normal and outlier data points.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        The axis on which the histogram will be plotted.
+    name : str
+        The name of the data.
+    outliers : Dict[str, np.ndarray]
+        Dictionary containing outlier indices for each data.
+    statistic_distances : Dict[str, np.ndarray]
+        Dictionary containing the distances for each data.
+    margin : float
+        The critical value for identifying outliers.
+
+    Returns
+    -------
+    None
+    """
+
     normal_index = ~np.isin(np.arange(0, len(statistic_distances[name])), outliers[name])
     log_distance = np.log(np.array(statistic_distances[name]))
     sns.histplot(log_distance[normal_index], bins=np.arange(min(log_distance) - 0.3, max(log_distance) + 0.3, 0.2), label=f"Normal ({sum(normal_index)})", ax=ax)
@@ -367,7 +453,43 @@ def distance_hist(ax, name, outliers, statistic_distances, margin):
     ax.legend(loc="upper right")
 
 
-def confidence_region_plot(ax, name, outliers, statistic_distances, betas_WEB, sigmas, mus_mle, margin):
+def confidence_region_plot(
+    ax: plt.Axes,
+    name: str,
+    outliers: Dict[str, np.ndarray],
+    statistic_distances: Dict[str, np.ndarray],
+    betas_WEB: Dict[str, np.ndarray],
+    sigmas: Dict[str, np.ndarray],
+    mus_mle: Dict[str, np.ndarray],
+    margin: float
+) -> None:
+    """
+    Plot the confidence region for weighted empirical Bayesian analysis.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        The axis on which the confidence region will be plotted.
+    name : str
+        The name of the data.
+    outliers : Dict[str, np.ndarray]
+        Dictionary containing outlier indices for each data.
+    statistic_distances : Dict[str, np.ndarray]
+        Dictionary containing the distances for each data.
+    betas_WEB : Dict[str, np.ndarray]
+        Dictionary containing the betas for each data.
+    sigmas : Dict[str, np.ndarray]
+        Dictionary containing the covariance matrices for each data.
+    mus_mle : Dict[str, np.ndarray]
+        Dictionary containing the means for each data.
+    margin : float
+        The critical value for identifying outliers.
+
+    Returns
+    -------
+    None
+    """
+
     normal_index = ~np.isin(np.arange(0, len(statistic_distances[name])), outliers[name])
     ax.scatter(betas_WEB[name][normal_index][:, 0], betas_WEB[name][normal_index][:, 1], color='blue')
     ax.scatter(betas_WEB[name][outliers[name]][:, 0], betas_WEB[name][outliers[name]][:, 1], color='#ff7f0e')
@@ -375,7 +497,43 @@ def confidence_region_plot(ax, name, outliers, statistic_distances, betas_WEB, s
     ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes, fontsize = 25)
 
 
-def outliers_density_plot(ax, name, densities_data, densities_mle, densities_outliers, start_radius, max_radius, gap):
+def outliers_density_plot(
+    ax: plt.Axes,
+    name: str,
+    densities_data: Dict[str, List[np.ndarray]],
+    densities_mle: Dict[str, np.ndarray],
+    densities_outliers: Dict[str, List[np.ndarray]],
+    start_radius: float,
+    max_radius: float,
+    gap: float
+) -> None:
+    """
+    Plot the density maps for weighted empirical Bayesian analysis.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        The axis on which the density maps will be plotted.
+    name : str
+        The name of the data.
+    densities_data : Dict[str, List[np.ndarray]]
+        Dictionary containing the density maps for each data.
+    densities_mle : Dict[str, np.ndarray]
+        Dictionary containing the maximum likelihood estimated density maps for each data.
+    densities_outliers : Dict[str, List[np.ndarray]]
+        Dictionary containing the density maps of outliers for each data.
+    start_radius : float
+        The minimum radius value for the plot.
+    max_radius : float
+        The maximum radius value for the plot.
+    gap : float
+        The gap between radius values for the plot.
+
+    Returns
+    -------
+    None
+    """
+
     x = np.arange(start_radius, max_radius + gap, gap)
     for density in densities_data[name]:
         ax.plot(x, density[:len(x)], alpha=0.3, c="orange", label="map")
@@ -386,117 +544,91 @@ def outliers_density_plot(ax, name, densities_data, densities_mle, densities_out
     ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
 
 
-def density_plot(ax, name, densities_data, start_radius, max_radius, gap):
+def density_plot(
+    ax: plt.Axes,
+    name: str,
+    densities_data: Dict[str, List[np.ndarray]],
+    start_radius: float,
+    max_radius: float,
+    gap: float
+) -> None:
+    """
+    Plot the density maps for weighted empirical Bayesian analysis.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        The axis on which the density maps will be plotted.
+    name : str
+        The name of the data.
+    densities_data : Dict[str, List[np.ndarray]]
+        Dictionary containing the density maps for each data.
+    start_radius : float
+        The minimum radius value for the plot.
+    max_radius : float
+        The maximum radius value for the plot.
+    gap : float
+        The gap between radius values for the plot.
+
+    Returns
+    -------
+    None
+    """
+
     x = np.arange(start_radius, max_radius + gap, gap)
     for density in densities_data[name]:
         ax.plot(x, density[:len(x)], linewidth=3, alpha=0.3, label="map")
     ax.text(0.8, 0.8, f"{name} \n ({len(densities_data[name])})", horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
     ax.axvline(x=1, color = 'red', label = 'unit radius', linestyle = '--')
-    
 
-def plot_density(
-    density_map: Dict,
-    estimated_density_maps: List,
+    
+def fitted_density_plot(
+    ax: plt.Axes,
+    name: str,
+    densities_data: Dict[str, List[np.ndarray]],
+    estimated_densities: List[Dict[str, np.ndarray]],
     start_radius: float,
     max_radius: float,
-    gap: float,
-    labels: List,
-    colors: List,
-    subplots_num: int = None,
-    separated: bool = False,
-    root: str = None
-) -> None:
+    gap: float, 
+    labels: List[str],
+    colors: List[str],
+    separated: Optional[bool] = False
+):
     """
-    Plot the density maps and the corresponding estimated density maps.
+    Plot the fitted density distributions along with the original density.
 
-    Params
+    Parameters
     ----------
-    density_map: Dict
-        Dictionary containing the density maps.
-    estimated_density_maps: List
-        List of dictionaries containing the estimated density maps.
-    start_radius: float
-        Minimum radius value.
-    max_radius: float
-        Maximum radius value.
-    gap: float
-        Gap between radius values.
-    labels: List
-        List of labels for the estimated density maps.
-    colors: List
-        List of colors for the estimated density maps.
-    subplots_num: int = None
-        Number of subplots to create.
-    separated: bool = False
-        Flag indicating whether to plot the density maps separately.
-    root: str = None
-        The root where you want to save the figure.
+    ax : plt.Axes
+        The matplotlib Axes object for plotting.
+    name : str
+        Name of the data.
+    densities_data : Dict[str, List[np.ndarray]]
+        A dictionary containing density data for different names.
+    estimated_densities : List[Dict[str, np.ndarray]]
+        List of dictionaries containing estimated densities for different estimators.
+    start_radius : float
+        The starting radius for the plot.
+    max_radius : float
+        The maximum radius for the plot.
+    gap : float
+        The gap between data points in the plot.
+    labels : List[str]
+        List of labels for each estimator.
+    colors : List[str]
+        List of colors for each estimator.
+    separated : bool, optional
+        Whether the data densities are separated, by default False.
 
     Returns
     -------
-        None
+    None
     """
 
-    # Set font size and weight
-    font = {'weight' : 'bold', 'size': 25}
-    matplotlib.rc('font', **font)
-
-    # Determine the number of subplots
-    subplots_num = len(density_map) if not subplots_num else subplots_num
-    nums = int(subplots_num / 5) + 1 if subplots_num % 5 != 0 else int(subplots_num / 5)
-
-    # Create the subplots
-    fig, axes = plt.subplots(nums, 5, figsize=(25, nums * 4), sharex=True, sharey=True, squeeze=False)
     x = np.arange(start_radius, max_radius + gap, gap)
-    length = len(x)
-
-    # Plot the density maps and estimated density maps separately
-    if separated:
-        curr_times = 0
-
-        for name in density_map: 
-            for times, elements in enumerate(zip(density_map[name], estimated_density_maps[name])):
-                density, estimated_density = elements
-                i = (times + curr_times) // 5
-                j = (times + curr_times) % 5
-                axes[i][j].plot(x, density[:length], linewidth=3, alpha=1, c="orange", label="map")
-                axes[i][j].plot(x, estimated_density[:length], label=labels[0], linestyle="--", c=colors[0], linewidth=3)
-                axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
-            curr_times += (times + 1)
-    else:
-        # Plot all density maps and corresponding estimated density maps together
-        for times, name in enumerate(density_map): 
-            i = times // 5
-            j = times % 5
-            chosen_estimated_density_maps = list(map(lambda x: x[name], estimated_density_maps))
-            for density in density_map[name]:
-                axes[i][j].plot(x, density[:length], linewidth=3, alpha=1, c="orange", label="map")
-                for idx, estimated_density in enumerate(chosen_estimated_density_maps):
-                    axes[i][j].plot(x, estimated_density[:length], label=labels[idx], linestyle="--", c=colors[idx], linewidth=3)
-            axes[i][j].text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=axes[i][j].transAxes)
-    
-    labels_handles = {label: handle for ax in fig.axes for handle, label in zip(*ax.get_legend_handles_labels())}
-
-    # Create legend
-    fig.legend(
-    labels_handles.values(),
-    labels_handles.keys(),
-    loc = "upper center",
-    bbox_to_anchor = (0.5, 0.1),
-    bbox_transform = plt.gcf().transFigure,
-    ncol=len(labels) + 1
-    )
-    
-
-    # Set x-axis and y-axis labels
-    fig.supxlabel('Radius')
-    fig.supylabel('Voxel Value')
-
-    # Adjust plot layout
-    fig.tight_layout(rect=(0.025, 0.03, 1, 1))
-
-    # Save the figure if specified
-    if root:
-        fig.savefig(root)
-
-    return
+    chosen_estimated_densities = list(map(lambda x: x[name], estimated_densities))
+    for density in densities_data[name]:
+        ax.plot(x, density[:len(x)], linewidth=3, alpha=1, c="orange", label="map")
+        for idx, estimated_density in enumerate(chosen_estimated_densities):
+            ax.plot(x, estimated_density[:len(x)], label=labels[idx], linestyle="--", c=colors[idx], linewidth=3)
+    ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
