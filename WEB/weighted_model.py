@@ -459,7 +459,7 @@ class WEB:
         "loc": "lower center",
         "bbox_to_anchor": (1.5, 0.1),
         "bbox_transform": plt.gcf().transFigure,
-        "ncol": len(estimators)
+        "ncol": len(estimators) + 1
         }
 
         sub_plots(
