@@ -305,7 +305,7 @@ def caculate_points(Xs_tilde: np.ndarray, betas_em: np.ndarray) -> np.ndarray:
 def caculate_density(
     distances_to_center: np.ndarray,
     betas: np.ndarray,
-    seperated: bool = False
+    separated: bool = False
 ) -> np.ndarray:
     """
     Calculates the densities using the given distances to center and betas.
@@ -316,7 +316,7 @@ def caculate_density(
         distances to center arrays.
     betas: np.ndarray
         beta arrays.
-    seperated: bool = False
+    separated: bool = False
         Flag indicating whether densities are being calculated for each group seperately.
 
     Returns
@@ -332,7 +332,7 @@ def caculate_density(
     for name in distances_to_center:
         distance_to_center = np.unique(distances_to_center[name][0])
         X_tilde = np.array([np.ones(len(distance_to_center)), -1 / 2 * distance_to_center**2])
-        if seperated:
+        if separated:
             density = []
             for i in range(len(betas[name])):
                 density.append(np.exp(X_tilde.T @ betas[name][i]))
