@@ -67,15 +67,15 @@ class WQEB:
         self.weights = {group_name[idx]: val for idx, val in enumerate([np.ones((in_group_num, grid_num))] * group_num)}
 
         # prior
-        sigmas = []
+        sigma = []
         for v, s in zip(self.vs.values(), self.ss.values()):
-            sigmas.append(invgamma.rvs(a=v / 2, scale=v * s / 2, size=in_group_num))
-        self.sigmas = {group_name[idx]: val for idx, val in enumerate(np.array(sigmas))}
+            sigma.append(invgamma.rvs(a=v / 2, scale=v * s / 2, size=in_group_num))
+        sigmas = {group_name[idx]: val for idx, val in enumerate(np.array(sigma))}
 
         # beta
         betas = []
         for mu, sigma_all, lambda_all in \
-            zip(self.mus.values(), self.sigmas.values(), self.lambdas.values()):
+            zip(self.mus.values(), sigmas.values(), self.lambdas.values()):
             beta = []
             counts = contained_group_num
             for sigma, lambda_ in zip(sigma_all, lambda_all):
@@ -92,7 +92,7 @@ class WQEB:
         ys_tilde = []
         ys_tilde_clean = []
         for beta_all, sigma_all, weight_all, X_tilde_all in \
-            zip(self.betas.values(), self.sigmas.values(), self.weights.values(), self.Xs_tilde.values()):
+            zip(self.betas.values(), sigmas.values(), self.weights.values(), self.Xs_tilde.values()):
             y_tilde = []
             y_tilde_clean = []
             for beta, sigma, weight, X_tilde in zip(beta_all, sigma_all, weight_all, X_tilde_all):
@@ -441,8 +441,6 @@ class WQEB:
         self.sigmas = {}
         self.margin = chi2.ppf(prob, df=2)
         for name in self.betas_WEB:
-            self.outliers[name] = []
-            self.densities_outliers[name] = []
             self.statistic_distances0[name] = np.array([]) 
             self.statistic_distances1[name] = np.array([]) 
             self.statistic_distances[name] = np.array([]) 
@@ -465,8 +463,96 @@ class WQEB:
                 self.statistic_distances[name] = np.append(self.statistic_distances[name], statistic_distance)
 
                 if (statistic_distance) > self.margin:
+                    if name not in self.outliers:
+                        self.outliers[name] = []
+                        self.densities_outliers[name] = []
                     self.outliers[name].append(i)
                     self.densities_outliers[name].append(self.densities_data[name][i])
         
         return self.outliers, self.statistic_distances
+    
+
+    def distances_hist(self, root=None):
+        sub_plots(
+            distance_hist, 
+            self.outliers, 
+            x_label = "Log Statistical Distance",
+            y_label = "Count", 
+            sharex=True, 
+            sharey=True,
+            root=root,
+            statistic_distances = self.statistic_distances, 
+            margin = self.margin
+            )
+        
+    def confidence_regions_plot(self, root=None):
+        point_n = Line2D([0], [0], label='Normal', marker='o', markersize=10, markeredgecolor='blue', markerfacecolor='blue', linestyle='')
+        point_o = Line2D([0], [0], label='Outliers', marker='o', markersize=10, markeredgecolor='red', markerfacecolor='#ff7f0e', linestyle='')
+        green_patch = Patch(color='g', label='Confidence Region', alpha=0.5)
+        legend = {
+            "handles": [point_n, point_o, green_patch],
+            "loc": "lower center",
+            "bbox_to_anchor": (1, 0.1),
+            "bbox_transform": plt.gcf().transFigure,
+            "ncol": 3  
+        }
+
+        sub_plots(
+            confidence_region_plot, 
+            self.outliers, 
+            x_label = "Intercept",
+            y_label = "Slope", 
+            legend = legend,
+            root=root,
+            statistic_distances = self.statistic_distances, 
+            betas_WEB = self.betas_WEB, 
+            sigmas = self.sigmas,
+            mus_mle = self.mus_mle, 
+            margin = self.margin
+            )
+    
+    def outliers_density_plot(self, root=None):
+        legend = {
+        "loc": "lower center",
+        "bbox_to_anchor": (1.5, 0.1),
+        "bbox_transform": plt.gcf().transFigure,
+        "ncol": 3
+        }
+
+        sub_plots(
+            outliers_density_plot, 
+            self.densities_data, 
+            x_label = "Radius",
+            y_label = "Voxel Value", 
+            fontsize = 25,
+            plot_dim = (4, 5),
+            figsize = (25, 16),
+            sharex=True, 
+            sharey=True,
+            legend = legend,
+            root=root,
+            densities_mle = self.densities_mle,
+            densities_outliers = self.densities_outliers,
+            max_radius = 1, 
+            gap = 0.2
+            )
+        
+    def densities_plot(self, root=None):
+
+        sub_plots(
+            density_plot, 
+            self.densities_data, 
+            x_label = "Radius",
+            y_label = "Voxel Value", 
+            fontsize = 25,
+            plot_dim = (4, 5),
+            figsize = (25, 16),
+            sharex=True, 
+            sharey=True,
+            root=root,
+            max_radius = 1, 
+            gap = 0.2
+            )
+
+    
 
