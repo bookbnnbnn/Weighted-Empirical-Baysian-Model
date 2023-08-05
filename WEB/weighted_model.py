@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import invgamma, multivariate_normal, chi2
+from scipy.optimize import fsolve
 import random
 import logging
 from typing import List, Dict, Tuple, Optional
@@ -197,7 +198,7 @@ class WEB:
             max_iter: int = 3, 
             alpha: float = 0.1, 
             gamma: float = 0.1, 
-            tol: float = 1e-4, 
+            tol: float = 1e-5, 
             patience: int = 3, 
             verbose: int = 1, 
     ) -> Tuple[Dict[str, np.ndarray], float]:
@@ -273,6 +274,207 @@ class WEB:
 
         return self.betas_WEB, self.beta_differences_histories
     
+
+    def WEB_iter_test(
+            self, 
+            max_iter: int = 3, 
+            alpha: float = 0.1, 
+            gamma: float = 0.1, 
+            tol: float = 1e-5, 
+            patience: int = 3, 
+            verbose: int = 1, 
+    ) -> Tuple[Dict[str, np.ndarray], float]:
+        """
+        Runs the iterative algorithm to estimate parameters.
+
+        Parameters
+        ----------
+        max_iter: int
+            Maximum number of iterations.
+        alpha: float
+            Alpha hyperparameter.
+        gamma: float
+            Gamma hyperparameter.
+        tol: float
+            Tolerance for convergence.
+        patience: int
+            Number of iterations without improvement to tolerate before stopping.
+        verbose: int
+            If 0, show nothing. 
+            If 1, display iteration progress. 
+            If 2, display iteration progress and beta difference.
+
+        Returns
+        ----------
+            Tuple containing the estimated betas and the mean beta difference.
+        """
+        # Initialize variables
+        self.betas_WLR = self.betas_initial
+        self.betas_WEB = {}
+        self.sigmas_WEB  = self.sigmas_initial
+        self.mus_mle = self.mus_initial
+        self.weights = {}
+        self.lambdas = {}
+        self.beta_differences_histories = {}
+
+        for name in tqdm(self.data_log, disable = True if verbose == 0 else False):
+
+            for j in range(len(self.Xs_tilde[name])):
+
+                def func(theta):
+                    beta, sigma = theta[:2], theta[2]
+                    X_tilde, y_tilde = self.Xs_tilde[name][j], self.data_log[name][j]
+                    resedual = y_tilde - np.dot(X_tilde, beta)
+                    weight = np.exp(-alpha * resedual ** 2 / (2 * sigma))
+                    ans1 = np.sum(X_tilde * (resedual * weight).reshape(-1, 1), axis=0)
+                    ans2 = np.sum((1 - resedual ** 2 / sigma) * weight, axis=0) - alpha / (1 + alpha) ** (3 / 2)
+                    return np.append(ans1, ans2) 
+                
+                init = np.append(self.betas_initial[name][j], self.sigmas_initial[name][j])
+                ans = fsolve(func, init)
+                self.betas_WLR[name][j], self.sigmas_WEB[name][j] = ans[:2], ans[2]
+
+            self.weights[name], _ = caculate_weights_and_lamdas(
+                self.Xs_tilde[name], self.data_log[name], self.betas_WLR[name], self.sigmas_WEB[name], alpha)
+            self.betas_WEB[name] = self.betas_WLR[name]
+
+            cur_beta = self.betas_WEB[name]
+            least_difference = np.inf
+            beta_differences_history = []
+            iter_num = 0
+
+            for i in range(max_iter):
+                # Iterate the algorithm
+                _, self.lambdas[name] = caculate_weights_and_lamdas(self.Xs_tilde[name], self.data_log[name], self.betas_WEB[name], self.sigmas_WEB[name], None, gamma, self.mus_mle[name])
+                self.mus_mle[name] = caculate_mus_mle(self.Xs_tilde[name], self.data_log[name], self.sigmas_WEB[name], self.weights[name], self.lambdas[name])
+                self.betas_WEB[name] = caculate_betas_WEB(self.Xs_tilde[name], self.data_log[name], self.weights[name], self.lambdas[name], self.mus_mle[name])
+
+                iter_num += 1
+                beta_difference = max(np.sum((self.betas_WEB[name] - cur_beta)**2, axis=0))
+
+                # Check convergence criteria and update variables
+                if beta_difference > tol and iter_num < (patience + 1):
+                    if beta_difference < least_difference:
+                        least_difference = beta_difference
+                        iter_num = 0
+                    cur_beta = self.betas_WEB[name]
+                    beta_differences_history.append(beta_difference)
+                else:
+                    self.betas_WEB[name] = cur_beta
+                    break
+
+            self.mus_mle[name] = caculate_mus_mle(self.Xs_tilde[name], self.data_log[name], self.sigmas_WEB[name], self.weights[name], self.lambdas[name])
+
+        self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
+
+        return self.betas_WEB
+    
+    
+    def WEB_iter_test2(
+            self, 
+            max_iter: int = 3, 
+            alpha: float = 0.1, 
+            gamma: float = 0.1, 
+            tol: float = 1e-5, 
+            patience: int = 3, 
+            verbose: int = 1, 
+    ) -> Tuple[Dict[str, np.ndarray], float]:
+        """
+        Runs the iterative algorithm to estimate parameters.
+
+        Parameters
+        ----------
+        max_iter: int
+            Maximum number of iterations.
+        alpha: float
+            Alpha hyperparameter.
+        gamma: float
+            Gamma hyperparameter.
+        tol: float
+            Tolerance for convergence.
+        patience: int
+            Number of iterations without improvement to tolerate before stopping.
+        verbose: int
+            If 0, show nothing. 
+            If 1, display iteration progress. 
+            If 2, display iteration progress and beta difference.
+
+        Returns
+        ----------
+            Tuple containing the estimated betas and the mean beta difference.
+        """
+        # Initialize variables
+        self.betas_WLR = self.betas_initial
+        self.betas_WEB = {}
+        self.sigmas_WEB  = self.sigmas_initial
+        self.mus_mle = self.mus_initial
+        self.beta_differences_histories = {}
+        self.weights = {}
+        self.lambdas = {}
+        for name in tqdm(self.data_log, disable = True if verbose == 0 else False):
+
+            cur_beta = self.betas_initial[name]
+            least_difference = np.inf
+            iter_num = 0
+
+            for i in range(max_iter):
+                # Iterate the algorithm
+                self.weights[name], _ = caculate_weights_and_lamdas(self.Xs_tilde[name], self.data_log[name], self.betas_WLR[name], self.sigmas_WEB[name], alpha)
+                self.betas_WLR[name] = caculate_betas_WLR(self.Xs_tilde[name], self.data_log[name], self.weights[name])
+                self.sigmas_WEB[name] = calculate_sigmas_test2(self.Xs_tilde[name], self.data_log[name], self.betas_WLR[name], self.weights[name], alpha)
+
+                # Calculate the difference between the current betas and the previous betas
+
+                beta_difference = max(np.sum((self.betas_WLR[name] - cur_beta)**2, axis=0))
+
+                if verbose == 2:
+                    logging.info(f"{name} iteration {i} finished with difference: {beta_difference}")
+
+                iter_num += 1
+
+                # Check convergence criteria and update variables
+                if beta_difference > tol and iter_num < (patience + 1):
+                    if beta_difference < least_difference:
+                        least_difference = beta_difference
+                        iter_num = 0
+                    cur_beta = self.betas_WLR[name]
+                else:
+                    self.betas_WLR[name] = cur_beta
+                    break
+
+            cur_beta = self.betas_initial[name]
+            least_difference = np.inf
+            iter_num = 0
+            self.betas_WEB[name] = self.betas_WLR[name]
+
+            for i in range(max_iter):
+                # Iterate the algorithm
+                _, self.lambdas[name] = caculate_weights_and_lamdas(self.Xs_tilde[name], self.data_log[name], self.betas_WEB[name], self.sigmas_WEB[name], None, gamma, self.mus_mle[name])
+                self.betas_WEB[name] = caculate_betas_WEB(self.Xs_tilde[name], self.data_log[name], self.weights[name], self.lambdas[name], self.mus_mle[name])
+                self.mus_mle[name] = caculate_mus_mle(self.Xs_tilde[name], self.data_log[name], self.sigmas_WEB[name], self.weights[name], self.lambdas[name])
+
+                # Calculate the difference between the current betas and the previous betas
+                beta_difference = max(np.sum((self.betas_WEB[name] - cur_beta)**2, axis=0))
+
+                if verbose == 2:
+                    logging.info(f"{name} iteration {i} finished with difference: {beta_difference}")
+
+                iter_num += 1
+
+                # Check convergence criteria and update variables
+                if beta_difference > tol and iter_num < (patience + 1):
+                    if beta_difference < least_difference:
+                        least_difference = beta_difference
+                        iter_num = 0
+                    cur_beta = self.betas_WEB[name]
+                else:
+                    self.betas_WEB[name] = cur_beta
+                    break
+            
+        self.densities_mle = caculate_density(self.distances_to_center, self.mus_mle)
+
+        return self.betas_WEB, self.beta_differences_histories
+
 
     def WLR_iter(
             self, 
@@ -537,6 +739,60 @@ class WEB:
         return self.outliers, self.statistic_distances
     
 
+    def find_outliers_test2(self, prob: float = 0.9973) -> Tuple[Dict[str, List[int]], Dict[str, np.ndarray]]:
+        """
+        Find outliers in the data using the weighted empirical Bayesian method.
+
+        Parameters
+        ----------
+        prob : float, optional
+            The probability value for the chi-square distribution to determine outliers, by default 0.9973.
+
+        Returns
+        -------
+        Tuple[Dict[str, List[int]], Dict[str, np.ndarray]]
+            A tuple containing dictionaries of outliers and statistical distances for each amino acid.
+        """
+
+        self.outliers = {}
+        self.densities_outliers = {}
+        self.statistic_distances0 = {}
+        self.statistic_distances1 = {}
+        self.statistic_distances = {}
+        self.sigmas = {}
+        self.margin = chi2.ppf(prob, df=2)
+        for name in self.betas_WEB:
+            self.statistic_distances0[name] = np.array([]) 
+            self.statistic_distances1[name] = np.array([]) 
+            self.statistic_distances[name] = np.array([]) 
+            mean = self.mus_mle[name]
+            betas = self.betas_WEB[name]
+            lambdas = self.lambdas[name]
+            sigma0 = np.sum([lambdas[i] * (betas - mean)[i][0] ** 2 for i in range(len(betas))]) / sum(lambdas)
+            sigma1 = np.sum([lambdas[i] * (betas - mean)[i][1] ** 2 for i in range(len(betas))]) / sum(lambdas)
+            sigma01 = np.sum([lambdas[i] * (betas - mean)[i][0] * (betas - mean)[i][1] for i in range(len(betas))]) / sum(lambdas)
+            self.sigmas[name] = np.array([sigma0, sigma01, sigma01, sigma1]).reshape(2, 2)
+
+            for i in range(len(betas)):
+                statistic_distance0 = (betas - mean)[i][0] ** 2 / sigma0
+                statistic_distance1 = (betas - mean)[i][1] ** 2 / sigma1
+                
+                self.statistic_distances0[name] = np.append(self.statistic_distances0[name], statistic_distance0)
+                self.statistic_distances1[name] = np.append(self.statistic_distances1[name], statistic_distance1)
+
+                statistic_distance = ((betas - mean)[i]).T @np.linalg.inv(self.sigmas[name]) @ (betas - mean)[i]
+                self.statistic_distances[name] = np.append(self.statistic_distances[name], statistic_distance)
+
+                if (statistic_distance) > self.margin:
+                    if name not in self.outliers:
+                        self.outliers[name] = []
+                        self.densities_outliers[name] = []
+                    self.outliers[name].append(i)
+                    self.densities_outliers[name].append(self.densities_data[name][i])
+        
+        return self.outliers, self.statistic_distances
+    
+
     def distances_hist(self, root: Optional[str] = None) -> None:
         """
         Plot the histogram of log statistical distances for weighted empirical Bayesian analysis.
@@ -551,11 +807,14 @@ class WEB:
         None
         """
 
+        plot_row = len(self.outliers) // 2 if len(self.outliers) % 2 == 0 else len(self.outliers) // 2 + 1
         sub_plots(
             distance_hist, 
             self.outliers, 
             x_label = "Log Statistical Distance",
             y_label = "Count", 
+            plot_dim = (plot_row , 5),
+            figsize = (25, plot_row * 4),
             sharex=True, 
             sharey=True,
             root=root,
@@ -593,6 +852,8 @@ class WEB:
             self.outliers, 
             x_label = "Intercept",
             y_label = "Slope", 
+            plot_dim = (4, 5),
+            figsize = (25, 16),
             legend = legend,
             root=root,
             statistic_distances = self.statistic_distances, 
@@ -618,7 +879,7 @@ class WEB:
 
         legend = {
         "loc": "lower center",
-        "bbox_to_anchor": (1.5, 0.1),
+        "bbox_to_anchor": (2, 0.1),
         "bbox_transform": plt.gcf().transFigure,
         "ncol": 3
         }

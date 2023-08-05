@@ -539,8 +539,8 @@ def outliers_density_plot(
         ax.plot(x, density[:len(x)], alpha=0.3, c="orange", label="map")
     if name in densities_outliers:
         for density_outliers in densities_outliers[name]:
-            ax.plot(x, density_outliers[:len(x)], alpha=1, c="green", label="outliers")
-    ax.plot(x, densities_mle[name][:len(x)], label="MLE", linestyle="--", c="blue", linewidth=3)
+            ax.plot(x, density_outliers[:len(x)], alpha=1, c="green", label="Outliers")
+    ax.plot(x, densities_mle[name][:len(x)], label="WEB MLE-E", linestyle="--", c="blue", linewidth=3)
     ax.text(0.9, 0.5, name, horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
 
 

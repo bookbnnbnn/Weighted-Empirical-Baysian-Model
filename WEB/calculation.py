@@ -83,6 +83,51 @@ def calculate_sigmas(
 
     return np.array(sigma_initial)
 
+
+def calculate_sigmas_test2(
+    X_tilde_all: np.ndarray,
+    y_tilde_all: np.ndarray,
+    betas: np.ndarray,
+    weights: np.ndarray,
+    alpha: float,
+    initial: bool = False
+) -> np.ndarray:
+    """
+    Calculates the sigmas based on the given data and betas.
+
+    Params
+    ----------
+    Xs_tilde: np.ndarray
+        Xs tilde arrays.
+    ys_tilde: np.ndarray
+        ys tilde arrays.
+    betas: np.ndarray
+        beta arrays.
+    initial: bool = False
+        Flag indicating whether initial sigmas are being calculated.
+
+    Returns:
+    ----------
+    np.ndarray
+        Array containing the calculated sigmas.
+
+    """
+
+    sigma_initial = []
+
+    if initial:
+        betas = [betas] * len(y_tilde_all)
+
+    # Calculate sigmas for each data point
+    for X_tilde, y_tilde, beta, weight in zip(X_tilde_all, y_tilde_all, betas, weights):
+        residual = (y_tilde - X_tilde @ beta)
+        nominator = np.sum(weight * residual ** 2)
+        denominator = np.sum(weight) - alpha / (1 + alpha) ** (3 / 2)
+        sigma_initial.append(nominator / denominator)
+
+    return np.array(sigma_initial)
+
+
 def caculate_mus_mle(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
@@ -215,8 +260,8 @@ def caculate_weights_and_lamdas(
     y_tilde_all: np.ndarray,
     beta_em_all: np.ndarray,
     sigma_all: np.ndarray,
-    alpha: float,
-    gamma: float,
+    alpha: float = None,
+    gamma: float = None,
     mu_mle: np.ndarray = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -255,13 +300,15 @@ def caculate_weights_and_lamdas(
 
     for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_em_all, sigma_all)):
         X_tilde, y_tilde, beta_em, sigma = elements
-
+        
         # Calculate weight
-        exponential_w = np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta_em)**2)
-        weight[idx] =  exponential_w / np.sum(exponential_w) * len(y_tilde) 
+        if alpha is not None:
+            exponential_w = np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta_em)**2)
+            # weight[idx] =  exponential_w / np.sum(exponential_w) * len(y_tilde) 
+            weight[idx] =  exponential_w
 
         # Calculate lambda
-        if mu_mle is not None:
+        if (mu_mle is not None) and (gamma is not None):
             coeff_l = sigma**(-(gamma + 2) / 2)
             exponential_l = np.exp(-(gamma / (2 * sigma)) * ((beta_em - mu_mle).T @ np.eye(2) @ (beta_em - mu_mle)))
             lambda_[idx] =  coeff_l * exponential_l
