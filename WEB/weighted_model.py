@@ -450,8 +450,8 @@ class WEB:
             for i in range(max_iter):
                 # Iterate the algorithm
                 _, self.lambdas[name] = caculate_weights_and_lamdas(self.Xs_tilde[name], self.data_log[name], self.betas_WEB[name], self.sigmas_WEB[name], None, gamma, self.mus_mle[name])
-                self.betas_WEB[name] = caculate_betas_WEB(self.Xs_tilde[name], self.data_log[name], self.weights[name], self.lambdas[name], self.mus_mle[name])
                 self.mus_mle[name] = caculate_mus_mle(self.Xs_tilde[name], self.data_log[name], self.sigmas_WEB[name], self.weights[name], self.lambdas[name])
+                self.betas_WEB[name] = caculate_betas_WEB(self.Xs_tilde[name], self.data_log[name], self.weights[name], self.lambdas[name], self.mus_mle[name])
 
                 # Calculate the difference between the current betas and the previous betas
                 beta_difference = max(np.sum((self.betas_WEB[name] - cur_beta)**2, axis=0))
@@ -554,7 +554,7 @@ class WEB:
         return self.betas_WLR
 
 
-    def fitted_densities_plot(self, root: Optional[str] = None):
+    def fitted_densities_plot(self, keys, root: Optional[str] = None):
         """
         Plot the fitted density distributions of data points using the WEB method.
 
@@ -569,8 +569,12 @@ class WEB:
         """
 
         fitted_densities = caculate_density(self.distances_to_center, self.betas_WEB, separated=True)
-        separated_densities = {f"{key}_{num + 1}": [density] for key, value in self.densities_data.items() for num, density in enumerate(value)}
-        separated_fitted_densities = {f"{key}_{num + 1}": density for key, value in fitted_densities.items() for num, density in enumerate(value)}
+        if keys is not None:
+            separated_densities = {f"{key}_{num + 1}": [density] for key in keys for num, density in enumerate(self.densities_data.get(key))}
+            separated_fitted_densities = {f"{key}_{num + 1}": density for key in keys for num, density in enumerate(fitted_densities.get(key))}
+        else:
+            separated_densities = {f"{key}_{num + 1}": [density] for key, value in self.densities_data.items() for num, density in enumerate(value)}
+            separated_fitted_densities = {f"{key}_{num + 1}": density for key, value in fitted_densities.items() for num, density in enumerate(value)}
 
         legend = {
         "loc": "lower left",
