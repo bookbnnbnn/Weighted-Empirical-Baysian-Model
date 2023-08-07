@@ -30,6 +30,9 @@ class WEB:
                     in_group_num: int = 6,
                     contained_ratio_data:  float = 0.1,
                     contained_ratio_beta: float = 0.1,
+                    points_num = 5,
+                    contaminated_beta0 = None, 
+                    contaminated_beta1 = None
                     ):
         """
         Function to create data for the model.
@@ -62,7 +65,7 @@ class WEB:
         self.ss = {group_name[idx]: val for idx, val in enumerate([0.1] * group_num)}
 
         # grid points
-        distances_to_center = np.repeat(np.arange(self.start_radius, self.max_radius + self.gap, self.gap), 100)
+        distances_to_center = np.repeat(np.arange(self.start_radius, self.max_radius + self.gap, self.gap), points_num)
         grid_num = len(distances_to_center)
         X_tilde = [[np.concatenate((np.ones((grid_num, 1)), (-1/ 2 * distances_to_center ** 2).reshape(-1, 1)), axis=1).tolist()] * in_group_num]
         self.distances_to_center = {group_name[idx]: val for idx, val in enumerate(np.array([[distances_to_center]* in_group_num] * group_num))}
@@ -103,7 +106,10 @@ class WEB:
                 data = multivariate_normal.rvs(X_tilde @ beta, sigma * np.diag(weight))
                 if contained_ratio_data > 0:
                     index = np.random.choice(np.arange(0, grid_num), int(grid_num * contained_ratio_data), replace=False)
-                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array([-4, 4]), sigma * np.diag(weight[index]))
+                    contaminated_beta0 = contaminated_beta0 if contaminated_beta0 is not None else beta[0]
+                    contaminated_beta1 = contaminated_beta1 if contaminated_beta1 is not None else beta[1]
+                    contaminated_beta = [contaminated_beta0, contaminated_beta1]
+                    data[index] = multivariate_normal.rvs(X_tilde[index, :] @ np.array(contaminated_beta), sigma * np.diag(weight[index]))
                 else:
                     index = [] 
                 y_tilde.append(data)
@@ -116,6 +122,7 @@ class WEB:
         self.data = {group_name[idx]: np.exp(val) for idx, val in enumerate(ys_tilde_clean)}
         self.densities_data = density_mean([self.data], self.distances_to_center)[0]
         return self.data_log
+    
     
     def read_data(
             self,
@@ -375,7 +382,7 @@ class WEB:
             max_iter: int = 3, 
             alpha: float = 0.1, 
             gamma: float = 0.1, 
-            tol: float = 1e-5, 
+            tol: float = 1e-15, 
             patience: int = 3, 
             verbose: int = 1, 
     ) -> Tuple[Dict[str, np.ndarray], float]:
@@ -406,8 +413,13 @@ class WEB:
         # Initialize variables
         self.betas_WLR = self.betas_initial
         self.betas_WEB = {}
+        self.betas_WEB_wo_lambdas = {}
+
         self.sigmas_WEB  = self.sigmas_initial
+
         self.mus_mle = self.mus_initial
+        self.mus_mle_wo_lambdas = self.mus_initial
+
         self.beta_differences_histories = {}
         self.weights = {}
         self.lambdas = {}
@@ -442,10 +454,15 @@ class WEB:
                     self.betas_WLR[name] = cur_beta
                     break
 
-            cur_beta = self.betas_initial[name]
+            lambdas = np.ones(len(self.Xs_tilde[name]))
+            self.mus_mle_wo_lambdas[name] = caculate_mus_mle(self.Xs_tilde[name], self.data_log[name], self.sigmas_WEB[name], self.weights[name], lambdas)
+            self.betas_WEB_wo_lambdas[name] = caculate_betas_WEB(self.Xs_tilde[name], self.data_log[name], self.weights[name], lambdas, self.mus_mle[name])
+
             least_difference = np.inf
             iter_num = 0
-            self.betas_WEB[name] = self.betas_WLR[name]
+            self.betas_WEB[name] = self.betas_WEB_wo_lambdas[name]
+            cur_beta = self.betas_WEB_wo_lambdas[name]
+            self.mus_mle[name] = self.mus_mle_wo_lambdas[name]
 
             for i in range(max_iter):
                 # Iterate the algorithm
