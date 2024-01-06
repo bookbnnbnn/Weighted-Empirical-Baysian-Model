@@ -4,47 +4,10 @@ import matplotlib.pyplot as plt
 from collections import Counter
 from typing import Dict, Tuple, List
 
-def caculate_betas_WEB(
-    X_tilde_all: np.ndarray,
-    y_tilde_all: np.ndarray,
-    weight_all: np.ndarray,
-    lambda_all: np.ndarray,
-    mu: np.ndarray, 
-) -> np.ndarray:
-    """
-    Calculates the mus tilde using the given data and parameters.
-
-    Params
-    ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    weights: np.ndarray
-        weight arrays.
-    lambdas: np.ndarray
-        lambda arrays.
-    mus: np.ndarray
-        mu arrays.
-
-    Returns:
-    ----------
-    np.ndarray
-        Array containing the calculated mus tilde.
-
-    """
-    
-    mu_tilde = []
-
-    # Calculate mus tilde for each data point
-    for X_tilde, y_tilde, weight, lambda_ in zip(X_tilde_all, y_tilde_all, weight_all, lambda_all):
-        mu_tilde.append(np.linalg.inv(weight * X_tilde.T @ X_tilde + lambda_ * np.eye(2)) @ \
-                        (weight * X_tilde.T @ y_tilde + lambda_ * np.eye(2) @ mu))
-
-    return np.array(mu_tilde)
 
 
-def caculate_betas_WEB_test2(
+
+def calculate_betas_WEB(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
     weights: np.ndarray,
@@ -58,22 +21,25 @@ def caculate_betas_WEB_test2(
 
     Params
     ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
+    X_tilde_all: np.ndarray
+        X_tilde arrays.
+    y_tilde_all: np.ndarray
+        y_tilde arrays.
     weights: np.ndarray
         weight arrays.
     lambdas: np.ndarray
         lambda arrays.
-    mus: np.ndarray
+    mu: np.ndarray
         mu arrays.
+    sigmas: np.ndarray
+        sigma arrays.
+    sigma_matrix: np.ndarray
+        sigma_matrix arrays.
 
     Returns:
     ----------
     np.ndarray
         Array containing the calculated mus tilde.
-
     """
     
     beta_hat = []
@@ -87,46 +53,6 @@ def caculate_betas_WEB_test2(
     return np.array(beta_hat)
 
 
-def calculate_sigmas(
-    X_tilde_all: np.ndarray,
-    y_tilde_all: np.ndarray,
-    betas: np.ndarray,
-    initial: bool = False
-) -> np.ndarray:
-    """
-    Calculates the sigmas based on the given data and betas.
-
-    Params
-    ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    betas: np.ndarray
-        beta arrays.
-    initial: bool = False
-        Flag indicating whether initial sigmas are being calculated.
-
-    Returns:
-    ----------
-    np.ndarray
-        Array containing the calculated sigmas.
-
-    """
-
-    sigma_initial = []
-
-    if initial:
-        betas = [betas] * len(y_tilde_all)
-
-    # Calculate sigmas for each data point
-    for X_tilde, y_tilde, beta in zip(X_tilde_all, y_tilde_all, betas):
-        residual = (y_tilde - X_tilde @ beta)
-        sigma_initial.append(np.median(residual ** 2))
-
-    return np.array(sigma_initial)
-
-
 def calculate_sigmas_MDPDE(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
@@ -136,16 +62,20 @@ def calculate_sigmas_MDPDE(
     initial: bool = False
 ) -> np.ndarray:
     """
-    Calculates the sigmas based on the given data and betas.
+    Calculates the sigmas based on the given data, betas, and weights using the MDPDE method.
 
     Params
     ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
+    X_tilde_all: np.ndarray
+        X_tilde arrays.
+    y_tilde_all: np.ndarray
+        y_tilde arrays.
     betas: np.ndarray
         beta arrays.
+    weights: np.ndarray
+        weight arrays.
+    alpha: float
+        Alpha hyperparameter for MDPDE.
     initial: bool = False
         Flag indicating whether initial sigmas are being calculated.
 
@@ -153,7 +83,6 @@ def calculate_sigmas_MDPDE(
     ----------
     np.ndarray
         Array containing the calculated sigmas.
-
     """
 
     sigma_initial = []
@@ -171,115 +100,8 @@ def calculate_sigmas_MDPDE(
     return np.array(sigma_initial)
 
 
-def caculate_mus_mle(
-    X_tilde_all: np.ndarray,
-    y_tilde_all: np.ndarray,
-    sigma_all: np.ndarray,
-    weight_all: np.ndarray,
-    lambda_all: np.ndarray, 
-) -> np.ndarray:
-    """
-    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
 
-    Params
-    ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    sigmas: np.ndarray
-        sigma arrays.
-    weights: np.ndarray
-        weight arrays.
-    lambdas: np.ndarray
-        lambda arrays.
-
-    Returns:
-    ----------
-    np.ndarray
-        Array containing the calculated mus MLE.
-
-    """
-
-    denominators = np.array([np.eye(2)] * len(y_tilde_all))
-    numerators = np.array([np.ones(2)] * len(y_tilde_all))
-    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weight_all, lambda_all)):          
-        X_tilde, y_tilde, sigma, weight, lambda_ = elements
-
-        # Calulate the sigma tilde matrix
-        x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
-        XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
-        xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
-        XWY = np.array([xy1, xy2])
-        sigma_tilde_matrix = np.linalg.inv(XWX + lambda_ * np.eye(2))
-
-        # Calulate the denominator and numerator to get mus MLE
-        weight = lambda_ / sigma * sigma_tilde_matrix @ XWX
-
-        denominators[idx] = weight
-        numerators[idx] = weight @ np.linalg.inv(XWX) @ XWY
-
-    return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
-
-
-def caculate_mus_mle_test2(
-    X_tilde_all: np.ndarray,
-    y_tilde_all: np.ndarray,
-    mu: np.ndarray,
-    sigma_all: np.ndarray,
-    sigma_matrix: np.ndarray,
-    weights: np.ndarray,
-    lambdas: np.ndarray, 
-) -> np.ndarray:
-    """
-    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
-
-    Params
-    ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    sigmas: np.ndarray
-        sigma arrays.
-    weights: np.ndarray
-        weight arrays.
-    lambdas: np.ndarray
-        lambda arrays.
-
-    Returns:
-    ----------
-    np.ndarray
-        Array containing the calculated mus MLE.
-
-    """
-
-    numerators = np.array([np.ones(2)] * len(y_tilde_all))
-    denominators = np.array([np.eye(2)] * len(y_tilde_all))
-    lambdas = lambdas if lambdas is not None else 1 / sigma_all
-    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weights, lambdas)):          
-        X_tilde, y_tilde, sigma, weight, lambda_ = elements
-
-        # Calulate the sigma tilde matrix
-        x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
-        XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
-        xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
-        XWY = np.array([xy1, xy2])
-
-        lambda_star = lambda_ * sigma 
-
-        sigma_matrix_inv = np.linalg.inv(sigma_matrix)
-        sigma_tilde_matrix = np.linalg.inv(XWX + lambda_star * sigma_matrix_inv)
-
-        beta_tilde = sigma_tilde_matrix @ (XWY +  lambda_star * sigma_matrix_inv @ mu)
-        # Calulate the denominator and numerator to get mus MLE
-        numerators[idx] = lambda_ * sigma_matrix_inv @ beta_tilde
-        denominators[idx] = lambda_ * sigma_matrix_inv
-
-    return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
-
-
-def caculate_mus_mle_test3(
+def calculate_mus_mle(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
     sigma_all: np.ndarray,
@@ -288,16 +110,18 @@ def caculate_mus_mle_test3(
     lambdas: np.ndarray, 
 ) -> np.ndarray:
     """
-    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
+    Calculates the MLE (maximum likelihood estimate) of mus using the given data and parameters.
 
     Params
     ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    sigmas: np.ndarray
+    X_tilde_all: np.ndarray
+        X_tilde arrays.
+    y_tilde_all: np.ndarray
+        y_tilde arrays.
+    sigma_all: np.ndarray
         sigma arrays.
+    sigma_matrix: np.ndarray
+        sigma_matrix array.
     weights: np.ndarray
         weight arrays.
     lambdas: np.ndarray
@@ -306,9 +130,9 @@ def caculate_mus_mle_test3(
     Returns:
     ----------
     np.ndarray
-        Array containing the calculated mus MLE.
-
+        Array containing the calculated MLE of mus.
     """
+
     numerators = np.array([np.ones(2)] * len(y_tilde_all))
     denominators = np.array([np.eye(2)] * len(y_tilde_all))
     for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weights, lambdas)):          
@@ -329,7 +153,7 @@ def caculate_mus_mle_test3(
     return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
 
 
-def caculate_betas_MDPDE(
+def calculate_betas_MDPDE(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
     weight_all: np.ndarray
@@ -339,18 +163,17 @@ def caculate_betas_MDPDE(
 
     Params
     ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    weights: np.ndarray
+    X_tilde_all: np.ndarray
+        X_tilde arrays.
+    y_tilde_all: np.ndarray
+        y_tilde arrays.
+    weight_all: np.ndarray
         weight arrays.
 
     Returns
     ----------
     np.ndarray
         Array containing the calculated weighted beta values.
-
     """
 
     beta_tilde = []
@@ -362,91 +185,39 @@ def caculate_betas_MDPDE(
     return np.array(beta_tilde)
 
 
-def caculate_mus_mle_weighted(
-    X_tilde_all: np.ndarray,
-    y_tilde_all: np.ndarray,
-    sigma_all: np.ndarray,
-    weight_all: np.ndarray,
-    lambda_all: np.ndarray
-) -> np.ndarray:
-    """
-    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
 
-    Params
-    ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    sigmas: np.ndarray
-        sigma arrays.
-    weights: np.ndarray
-        weight arrays.
-
-    Returns:
-    ----------
-    np.ndarray
-        Array containing the calculated mus MLE.
-
-    """
-    denominators = np.array([np.eye(2)] * len(y_tilde_all))
-    numerators = np.array([np.ones(2)] * len(y_tilde_all))
-    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weight_all, lambda_all)):          
-        X_tilde, y_tilde, sigma, weight, lambda_ = elements
-
-        x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
-        XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
-        xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
-        XWY = np.array([xy1, xy2])
-
-        denominators[idx] = XWX / sigma * lambda_
-        numerators[idx] = XWY / sigma * lambda_
-
-    return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
-
-
-def caculate_weights_and_lamdas(
+def calculate_weights(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
     beta_em_all: np.ndarray,
     sigma_all: np.ndarray,
     alpha: float = None,
-    gamma: float = None,
-    mu_mle: np.ndarray = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Calculates the weights and lambdas using the given data and parameters.
+    Calculates the weights using the given data and parameters.
 
     Params
     ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    betas_em: np.ndarray
+    X_tilde_all: np.ndarray
+        X_tilde arrays.
+    y_tilde_all: np.ndarray
+        y_tilde arrays.
+    beta_em_all: np.ndarray
         beta_em arrays.
-    sigmas: np.ndarray
+    sigma_all: np.ndarray
         sigma_mle arrays.
     alpha: float
         Alpha parameter value.
-    gamma: float
-        Gamma parameter value.
-    mu_mle: np.ndarray = None
-        mus mle arrays.
 
     Returns:
     ----------
-    Tuple containing the calculated weights and lambdas.
+    Tuple containing the calculated weights.
 
     weights: np.ndarray
         The weight of each data point.
-    lambdas: np.ndarray
-        The weight of each residue
     """
 
-    mu_mle = mu_mle if mu_mle is not None else None
     weight = np.array([np.ones(len(y_tilde_all[0]))] * len(y_tilde_all))
-    lambda_ = np.ones(len(beta_em_all))
 
     for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_em_all, sigma_all)):
         X_tilde, y_tilde, beta, sigma = elements
@@ -454,31 +225,37 @@ def caculate_weights_and_lamdas(
         # Calculate weight
         if alpha is not None:
             exponential_w = np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta)**2)
-            # if np.sum(exponential_w > 1e10) > 0 :
-                # print(sigma)
-                # print(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta)**2)
-                # print("----------------------------")
-
-            # weight[idx] =  exponential_w / np.sum(exponential_w) * len(y_tilde) 
             weight[idx] =  exponential_w
 
-        # Calculate lambda
-        if (mu_mle is not None) and (gamma is not None):
-            coeff_l = sigma**(-(gamma + 2) / 2)
-            exponential_l = np.exp(-(gamma / (2 * sigma)) * ((beta - mu_mle).T @ (beta - mu_mle)))
-            lambda_[idx] =  coeff_l * exponential_l
-
-    return weight, lambda_
+    return weight
 
 
-def caculate_mus_MDPDE(
+
+def calculate_mus_MDPDE(
     beta_all: np.ndarray,
     lambdas: np.ndarray = None, 
 ):
+    """
+    Calculates the mus using the given beta values and lambdas.
+
+    Params
+    ----------
+    beta_all: np.ndarray
+        beta arrays.
+    lambdas: np.ndarray
+        lambda arrays, optional.
+
+    Returns
+    ----------
+    np.ndarray
+        Array containing the calculated mus.
+
+    """
     numerator = np.sum([lambda_ * beta for lambda_, beta in zip(lambdas, beta_all)], axis=0)
     denominator = np.sum(lambdas)
 
     return numerator / denominator
+
 
 def calculate_sigma_matrix_MDPDE(
     beta_all: np.ndarray,
@@ -488,26 +265,30 @@ def calculate_sigma_matrix_MDPDE(
     initial: bool = False, 
     params: tuple = None
 ):
-    # sigmas = []
-    # if homo:
-    #     sigma_matrices_rep = np.eye(2)
-    # else:
-    #     for i in range(len(sigma_all)):
-    #         residual = (beta_all - mu_mle)[i].reshape(-1, 1)
-    #         sigmas.append(residual @ residual.T)
-    #     if lambda_all is None:
-    #         sigma_matrices_rep = np.median(sigmas, axis=0)
-    #     else: 
-    #         sigma_matrices_rep = np.sum(sigmas, axis=0) / np.sum(lambda_all)
+    """
+    Calculates the sigma matrix using the given beta values, mu MLE, and lambdas.
 
-    #     if sigma_matrices_rep[0][0] == 0:
-    #         sigma_matrices_rep[0][0] = 1e-20
-    #     if sigma_matrices_rep[1][1] == 0:
-    #         sigma_matrices_rep[1][1] = 1e-20
+    Params
+    ----------
+    beta_all: np.ndarray
+        beta arrays.
+    mu_mle: np.ndarray
+        mu MLE arrays.
+    lambdas: np.ndarray, optional
+        lambda arrays.
+    gamma: float, optional
+        Gamma parameter value.
+    initial: bool, optional
+        Flag indicating whether initial sigma matrix is being calculated.
+    params: tuple, optional
+        Lower and upper bounds for selecting data points.
 
-    # sigma_all = np.repeat(sigma_all, 4).reshape(len(sigma_all), 2, 2)
+    Returns
+    ----------
+    np.ndarray
+        Calculated sigma matrix.
 
-    # return sigma_matrices_rep, sigma_matrices_rep / sigma_all
+    """
     residuals = beta_all - mu_mle
     lower, upper = params if params is not None else (0.4, 0.6)
     if initial:
@@ -530,67 +311,48 @@ def calculate_sigma_matrix_MDPDE(
     denominator = np.sum(lambdas - gamma / ((1 + gamma) ** (3/2)))
 
     return numerator / denominator
-
     
 
-def caculate_weights_and_lamdas_test2(
-    X_tilde_all: np.ndarray,
-    y_tilde_all: np.ndarray,
+def calculate_lamdas(
     beta_all: np.ndarray,
-    sigma_all: np.ndarray,
-    alpha: float = 0.5,
     gamma: float = 0.5,
     mu_mle: np.ndarray = None,
     sigma_matrix: np.ndarray = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
-    Calculates the weights and lambdas using the given data and parameters.
+    Calculates the lambdas using the given data and parameters.
 
     Params
     ----------
-    Xs_tilde: np.ndarray
-        Xs tilde arrays.
-    ys_tilde: np.ndarray
-        ys tilde arrays.
-    betas_em: np.ndarray
+    beta_all: np.ndarray
         beta_em arrays.
-    sigmas: np.ndarray
-        sigma_mle arrays.
-    alpha: float
-        Alpha parameter value.
-    gamma: float
+    gamma: float, optional
         Gamma parameter value.
-    mu_mle: np.ndarray = None
+    mu_mle: np.ndarray, optional
         mus mle arrays.
+    sigma_matrix: np.ndarray, optional
+        Sigma matrix.
 
-    Returns:
+    Returns
     ----------
-    Tuple containing the calculated weights and lambdas.
-
-    weights: np.ndarray
-        The weight of each data point.
-    lambdas: np.ndarray
-        The weight of each residue
+    np.ndarray
+        The weight of each residue.
     """
 
     mu_mle = mu_mle if mu_mle is not None else None
-    weight = np.array([np.ones(len(y_tilde_all[0]))] * len(y_tilde_all))
     lambda_ = np.ones(len(beta_all))
 
-    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_all, sigma_all)):
-        X_tilde, y_tilde, beta, sigma = elements
-        
-        # Calculate weight
-        weight[idx] =  np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta)**2)
+    for idx, beta in enumerate(beta_all):
 
         # Calculate lambda
         if (mu_mle is not None) and (gamma is not None):
             lambda_[idx] =  np.exp(-(gamma / 2) * ((beta - mu_mle).T @ np.linalg.inv(sigma_matrix) @ (beta - mu_mle))) 
 
-    return weight, lambda_
+    return lambda_
 
 
-def caculate_points(Xs_tilde: np.ndarray, betas_em: np.ndarray) -> np.ndarray:
+
+def calculate_points(Xs_tilde: np.ndarray, betas_em: np.ndarray) -> np.ndarray:
     """
     Calculates the points using the given Xs tilde and beta_em.
 
@@ -623,7 +385,7 @@ def caculate_points(Xs_tilde: np.ndarray, betas_em: np.ndarray) -> np.ndarray:
     return points
 
 
-def caculate_density(
+def calculate_density(
     distances_to_center: np.ndarray,
     betas: np.ndarray,
     separated: bool = False
@@ -664,7 +426,7 @@ def caculate_density(
     return densities
 
 
-def caculate_similarity(
+def calculate_similarity(
     data: Dict[str, List[List[float]]],
     data_estimated: Dict[str, List[List[float]]]
 ) -> Dict[str, List[float]]:
@@ -673,9 +435,9 @@ def caculate_similarity(
 
     Params
     ----------
-    densities_data: Dict[str, List[List[float]]]
+    data: Dict[str, List[List[float]]]
         Dictionary of data densities.
-    densities_estimated: Dict[str, List[List[float]]]
+    data_estimated: Dict[str, List[List[float]]]
         Dictionary of estimated densities.
 
     Returns:
@@ -699,3 +461,10 @@ def caculate_similarity(
         qscores_all[name] = qscores
 
     return qscores_all
+
+
+def solve(beta):
+    beta_0, beta_1 = beta
+    tau = 1 / beta_1
+    A = np.exp(beta_0 + 3 / 2 * np.log(beta_1))
+    return tau, A
