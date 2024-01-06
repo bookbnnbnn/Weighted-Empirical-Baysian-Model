@@ -44,6 +44,49 @@ def caculate_betas_WEB(
     return np.array(mu_tilde)
 
 
+def caculate_betas_WEB_test2(
+    X_tilde_all: np.ndarray,
+    y_tilde_all: np.ndarray,
+    weights: np.ndarray,
+    lambdas: np.ndarray,
+    mu: np.ndarray, 
+    sigmas: np.ndarray,
+    sigma_matrix: np.ndarray,
+) -> np.ndarray:
+    """
+    Calculates the mus tilde using the given data and parameters.
+
+    Params
+    ----------
+    Xs_tilde: np.ndarray
+        Xs tilde arrays.
+    ys_tilde: np.ndarray
+        ys tilde arrays.
+    weights: np.ndarray
+        weight arrays.
+    lambdas: np.ndarray
+        lambda arrays.
+    mus: np.ndarray
+        mu arrays.
+
+    Returns:
+    ----------
+    np.ndarray
+        Array containing the calculated mus tilde.
+
+    """
+    
+    beta_hat = []
+
+    # Calculate mus tilde for each data point
+    for X_tilde, y_tilde, weight, lambda_, sigma in zip(X_tilde_all, y_tilde_all, weights, lambdas, sigmas):
+        lambda_star = lambda_ * sigma
+        beta_hat.append(np.linalg.inv(weight * X_tilde.T @ X_tilde + lambda_star * np.linalg.inv(sigma_matrix)) @ \
+                        (weight * X_tilde.T @ y_tilde + lambda_star * np.linalg.inv(sigma_matrix) @ mu))
+
+    return np.array(beta_hat)
+
+
 def calculate_sigmas(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
@@ -84,7 +127,7 @@ def calculate_sigmas(
     return np.array(sigma_initial)
 
 
-def calculate_sigmas_test2(
+def calculate_sigmas_MDPDE(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
     betas: np.ndarray,
@@ -122,7 +165,7 @@ def calculate_sigmas_test2(
     for X_tilde, y_tilde, beta, weight in zip(X_tilde_all, y_tilde_all, betas, weights):
         residual = (y_tilde - X_tilde @ beta)
         nominator = np.sum(weight * residual ** 2)
-        denominator = np.sum(weight) - alpha / (1 + alpha) ** (3 / 2)
+        denominator = np.sum(weight - alpha / (1 + alpha) ** (3 / 2))
         sigma_initial.append(nominator / denominator)
 
     return np.array(sigma_initial)
@@ -179,7 +222,114 @@ def caculate_mus_mle(
     return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
 
 
-def caculate_betas_WLR(
+def caculate_mus_mle_test2(
+    X_tilde_all: np.ndarray,
+    y_tilde_all: np.ndarray,
+    mu: np.ndarray,
+    sigma_all: np.ndarray,
+    sigma_matrix: np.ndarray,
+    weights: np.ndarray,
+    lambdas: np.ndarray, 
+) -> np.ndarray:
+    """
+    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
+
+    Params
+    ----------
+    Xs_tilde: np.ndarray
+        Xs tilde arrays.
+    ys_tilde: np.ndarray
+        ys tilde arrays.
+    sigmas: np.ndarray
+        sigma arrays.
+    weights: np.ndarray
+        weight arrays.
+    lambdas: np.ndarray
+        lambda arrays.
+
+    Returns:
+    ----------
+    np.ndarray
+        Array containing the calculated mus MLE.
+
+    """
+
+    numerators = np.array([np.ones(2)] * len(y_tilde_all))
+    denominators = np.array([np.eye(2)] * len(y_tilde_all))
+    lambdas = lambdas if lambdas is not None else 1 / sigma_all
+    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weights, lambdas)):          
+        X_tilde, y_tilde, sigma, weight, lambda_ = elements
+
+        # Calulate the sigma tilde matrix
+        x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
+        XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
+        xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
+        XWY = np.array([xy1, xy2])
+
+        lambda_star = lambda_ * sigma 
+
+        sigma_matrix_inv = np.linalg.inv(sigma_matrix)
+        sigma_tilde_matrix = np.linalg.inv(XWX + lambda_star * sigma_matrix_inv)
+
+        beta_tilde = sigma_tilde_matrix @ (XWY +  lambda_star * sigma_matrix_inv @ mu)
+        # Calulate the denominator and numerator to get mus MLE
+        numerators[idx] = lambda_ * sigma_matrix_inv @ beta_tilde
+        denominators[idx] = lambda_ * sigma_matrix_inv
+
+    return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
+
+
+def caculate_mus_mle_test3(
+    X_tilde_all: np.ndarray,
+    y_tilde_all: np.ndarray,
+    sigma_all: np.ndarray,
+    sigma_matrix: np.ndarray,
+    weights: np.ndarray,
+    lambdas: np.ndarray, 
+) -> np.ndarray:
+    """
+    Calculates the mus MLE (maximum likelihood estimate) using the given data and parameters.
+
+    Params
+    ----------
+    Xs_tilde: np.ndarray
+        Xs tilde arrays.
+    ys_tilde: np.ndarray
+        ys tilde arrays.
+    sigmas: np.ndarray
+        sigma arrays.
+    weights: np.ndarray
+        weight arrays.
+    lambdas: np.ndarray
+        lambda arrays.
+
+    Returns:
+    ----------
+    np.ndarray
+        Array containing the calculated mus MLE.
+
+    """
+    numerators = np.array([np.ones(2)] * len(y_tilde_all))
+    denominators = np.array([np.eye(2)] * len(y_tilde_all))
+    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, sigma_all, weights, lambdas)):          
+        X_tilde, y_tilde, sigma, weight, lambda_ = elements
+        lambda_star = lambda_ * sigma 
+        sigma_matrix_inv = np.linalg.inv(sigma_matrix)
+
+        # Calulate the sigma tilde matrix
+        x11, x12, x22 = np.sum(X_tilde[:, 0]**2 * weight), np.sum(X_tilde[:, 0] * X_tilde[:, 1] * weight), np.sum(X_tilde[:, 1]**2 * weight)
+        XWX = np.array([x11, x12, x12, x22]).reshape(2, 2)
+        xy1, xy2= np.sum(X_tilde[:, 0]* y_tilde * weight), np.sum(X_tilde[:, 1] * y_tilde * weight)
+        XWY = np.array([xy1, xy2])
+        sigma_tilde_matrix = np.linalg.inv(XWX + lambda_star * sigma_matrix_inv)
+
+        numerators[idx] = lambda_ * sigma_matrix_inv @ sigma_tilde_matrix @ XWY 
+        denominators[idx] = lambda_ * sigma_matrix_inv @ (np.eye(len(sigma_matrix)) - lambda_star * sigma_tilde_matrix @ sigma_matrix_inv)
+
+    return np.linalg.inv(np.sum(denominators, axis=0)) @ np.sum(numerators, axis=0)
+
+
+def caculate_betas_MDPDE(
     X_tilde_all: np.ndarray,
     y_tilde_all: np.ndarray,
     weight_all: np.ndarray
@@ -299,19 +449,143 @@ def caculate_weights_and_lamdas(
     lambda_ = np.ones(len(beta_em_all))
 
     for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_em_all, sigma_all)):
-        X_tilde, y_tilde, beta_em, sigma = elements
+        X_tilde, y_tilde, beta, sigma = elements
         
         # Calculate weight
         if alpha is not None:
-            exponential_w = np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta_em)**2)
+            exponential_w = np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta)**2)
+            # if np.sum(exponential_w > 1e10) > 0 :
+                # print(sigma)
+                # print(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta)**2)
+                # print("----------------------------")
+
             # weight[idx] =  exponential_w / np.sum(exponential_w) * len(y_tilde) 
             weight[idx] =  exponential_w
 
         # Calculate lambda
         if (mu_mle is not None) and (gamma is not None):
             coeff_l = sigma**(-(gamma + 2) / 2)
-            exponential_l = np.exp(-(gamma / (2 * sigma)) * ((beta_em - mu_mle).T @ np.eye(2) @ (beta_em - mu_mle)))
+            exponential_l = np.exp(-(gamma / (2 * sigma)) * ((beta - mu_mle).T @ (beta - mu_mle)))
             lambda_[idx] =  coeff_l * exponential_l
+
+    return weight, lambda_
+
+
+def caculate_mus_MDPDE(
+    beta_all: np.ndarray,
+    lambdas: np.ndarray = None, 
+):
+    numerator = np.sum([lambda_ * beta for lambda_, beta in zip(lambdas, beta_all)], axis=0)
+    denominator = np.sum(lambdas)
+
+    return numerator / denominator
+
+def calculate_sigma_matrix_MDPDE(
+    beta_all: np.ndarray,
+    mu_mle: np.ndarray,
+    lambdas: np.ndarray = None, 
+    gamma: float = None,
+    initial: bool = False, 
+    params: tuple = None
+):
+    # sigmas = []
+    # if homo:
+    #     sigma_matrices_rep = np.eye(2)
+    # else:
+    #     for i in range(len(sigma_all)):
+    #         residual = (beta_all - mu_mle)[i].reshape(-1, 1)
+    #         sigmas.append(residual @ residual.T)
+    #     if lambda_all is None:
+    #         sigma_matrices_rep = np.median(sigmas, axis=0)
+    #     else: 
+    #         sigma_matrices_rep = np.sum(sigmas, axis=0) / np.sum(lambda_all)
+
+    #     if sigma_matrices_rep[0][0] == 0:
+    #         sigma_matrices_rep[0][0] = 1e-20
+    #     if sigma_matrices_rep[1][1] == 0:
+    #         sigma_matrices_rep[1][1] = 1e-20
+
+    # sigma_all = np.repeat(sigma_all, 4).reshape(len(sigma_all), 2, 2)
+
+    # return sigma_matrices_rep, sigma_matrices_rep / sigma_all
+    residuals = beta_all - mu_mle
+    lower, upper = params if params is not None else (0.4, 0.6)
+    if initial:
+        r_square = np.sum(residuals ** 2, axis=1)
+    
+        selected_index = np.argsort(r_square)[int(len(r_square) * lower): int(len(r_square) * upper)]
+        selected_beta = beta_all[selected_index]
+
+        sigma_matrix = np.zeros((2, 2))
+        for selected_residual in (selected_beta - mu_mle):
+            selected_residual = selected_residual.reshape(-1, 1)
+            sigma_matrix += selected_residual @ selected_residual.T / len(selected_beta)
+        
+        return sigma_matrix
+    numerators = []
+    for residual, lambda_ in zip(residuals, lambdas):
+        residual = residual.reshape(-1, 1)
+        numerators.append(lambda_ * residual @ residual.T)
+    numerator = np.sum(numerators, axis=0)
+    denominator = np.sum(lambdas - gamma / ((1 + gamma) ** (3/2)))
+
+    return numerator / denominator
+
+    
+
+def caculate_weights_and_lamdas_test2(
+    X_tilde_all: np.ndarray,
+    y_tilde_all: np.ndarray,
+    beta_all: np.ndarray,
+    sigma_all: np.ndarray,
+    alpha: float = 0.5,
+    gamma: float = 0.5,
+    mu_mle: np.ndarray = None,
+    sigma_matrix: np.ndarray = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Calculates the weights and lambdas using the given data and parameters.
+
+    Params
+    ----------
+    Xs_tilde: np.ndarray
+        Xs tilde arrays.
+    ys_tilde: np.ndarray
+        ys tilde arrays.
+    betas_em: np.ndarray
+        beta_em arrays.
+    sigmas: np.ndarray
+        sigma_mle arrays.
+    alpha: float
+        Alpha parameter value.
+    gamma: float
+        Gamma parameter value.
+    mu_mle: np.ndarray = None
+        mus mle arrays.
+
+    Returns:
+    ----------
+    Tuple containing the calculated weights and lambdas.
+
+    weights: np.ndarray
+        The weight of each data point.
+    lambdas: np.ndarray
+        The weight of each residue
+    """
+
+    mu_mle = mu_mle if mu_mle is not None else None
+    weight = np.array([np.ones(len(y_tilde_all[0]))] * len(y_tilde_all))
+    lambda_ = np.ones(len(beta_all))
+
+    for idx, elements in enumerate(zip(X_tilde_all, y_tilde_all, beta_all, sigma_all)):
+        X_tilde, y_tilde, beta, sigma = elements
+        
+        # Calculate weight
+        weight[idx] =  np.exp(-(alpha / (2 * sigma)) * (y_tilde - X_tilde @ beta)**2)
+
+        # Calculate lambda
+        if (mu_mle is not None) and (gamma is not None):
+            lambda_[idx] =  np.exp(-(gamma / 2) * ((beta - mu_mle).T @ np.linalg.inv(sigma_matrix) @ (beta - mu_mle))) 
 
     return weight, lambda_
 
@@ -391,8 +665,8 @@ def caculate_density(
 
 
 def caculate_similarity(
-    densities_data: Dict[str, List[List[float]]],
-    densities_estimated: Dict[str, List[List[float]]]
+    data: Dict[str, List[List[float]]],
+    data_estimated: Dict[str, List[List[float]]]
 ) -> Dict[str, List[float]]:
     """
     Calculates the similarity scores between data densities and estimated densities.
@@ -413,16 +687,13 @@ def caculate_similarity(
 
     qscores_all = {}
 
-    for name in densities_data:
+    for name in data:
 
         qscores = []
-
         # Calculate similarity score for each data and estimated density pair
-        for data_density, estimated_density in zip(densities_data[name], densities_estimated[name]):
-            data_density = np.array(data_density)
-            estimated_density = np.array(estimated_density)
-            numerator = np.dot(data_density - data_density.mean(), estimated_density - estimated_density.mean())
-            denominator = np.sqrt(sum((data_density - data_density.mean())**2)) * np.sqrt(sum((estimated_density - estimated_density.mean())**2))
+        for datum, estimated_datum in zip(data[name], data_estimated[name]):
+            numerator = np.dot(datum - datum.mean(), estimated_datum - estimated_datum.mean())
+            denominator = np.sqrt(sum((datum - datum.mean())**2)) * np.sqrt(sum((estimated_datum - estimated_datum.mean())**2))
             qscores.append(numerator / denominator)
 
         qscores_all[name] = qscores

@@ -45,16 +45,16 @@ def read_map(root: str) -> Tuple[np.ndarray]:
     grid_size = np.array(header["cella"].item()) / data.shape
     return data, grid_size, origin
 
-def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
+def read_pdb(root: str, atoms: List = None) -> pd.DataFrame:
     """
-    Read atomic model from `pdb` file
+    Read atom model from `pdb` file
 
     Parameters
     ----------
     root: str
         The root of `map` data 
-    atomic: str
-        The chosen atomic that we only consider
+    atom: str
+        The chosen atom that we only consider
 
     Return
     ----------
@@ -65,7 +65,7 @@ def read_pdb(root: str, atomic: str = None) -> pd.DataFrame:
     ppdb = PandasPdb().read_pdb(root)
     df = ppdb.df['ATOM']
     new_df = df[df.groupby(["residue_number", "atom_name"])["alt_loc"].transform(min) == df["alt_loc"]]
-    df_chosen = new_df[new_df["atom_name"] == atomic] if atomic is not None else new_df
+    df_chosen = new_df[new_df["atom_name"].isin(atoms)] if atoms is not None else new_df
     return df_chosen
     
 def generate_points_on_sphere(
@@ -144,6 +144,7 @@ def generate_grid_points(
     grid_points_chosen = {name: [] for name in unique_residue}
     distances_to_center = {name: [] for name in unique_residue}
     Xs_tilde = {name: [] for name in unique_residue}
+    atom_coordinates = {name: [] for name in unique_residue}
     
     for atomic_index in tqdm(range(residue_names.shape[0])):
         grid_points = {}
@@ -154,7 +155,7 @@ def generate_grid_points(
         for rad in rads:
             # The number of grid points we want to search depends on the dense of the ball
             num_points = int((rad**2 / rads[1]**2) * base_num_points)
-            num_candidate = 1 if num_points == 0 else num_points if num_points < max_points else max_points
+            num_candidate = base_num_points if num_points == 0 else num_points if num_points < max_points else max_points
             atom_point = atom_points[atomic_index].reshape(-1)
             # Search grid points for `MAX_ITER` otherwise give up
 
@@ -165,8 +166,15 @@ def generate_grid_points(
         grid_points_chosen[name].append(np.array(all_grid_points))
         distances_to_center[name].append(np.array(all_distances_to_center))
         Xs_tilde[name].append(np.array(all_Xs_tilde))
+        atom_coordinates[name].append(atom_point)
     
-    return grid_points_chosen, distances_to_center, Xs_tilde
+    for name in unique_residue:
+        grid_points_chosen[name] = np.array(grid_points_chosen[name])
+        distances_to_center[name] = np.array(distances_to_center[name])
+        Xs_tilde[name] = np.array(Xs_tilde[name])
+        atom_coordinates[name] = np.array(atom_coordinates[name])
+    
+    return grid_points_chosen, distances_to_center, Xs_tilde, atom_coordinates
 
 
 def interpolator(
@@ -246,7 +254,7 @@ def density_mean(
 
     return radius_densities
 
-def simulation_plot(data: np.ndarray, zlabel: str, title: str, min_num: float = 0, max_num: float = 0.5) -> None:
+def simulation_plot(data: np.ndarray, zlabel: str, title: str, min_num: float = 0, max_num: float = 0.4, save: bool = False) -> None:
     """
     Plot a 3D surface plot for simulation data.
 
@@ -286,18 +294,22 @@ def simulation_plot(data: np.ndarray, zlabel: str, title: str, min_num: float = 
     # To use a custom hillshading mode, override the built-in shading and pass
     # in the rgb colors of the shaded surface calculated from "shade".
     rgb = ls.shade(z, cmap=cm.gist_earth, vert_exag=0.1, blend_mode='overlay')
-    surf = ax.plot_surface(x, y, z, rstride=1, cstride=1, facecolors=rgb,
-                        linewidth=1, antialiased=False, shade=False,
-                        cmap=mappable.cmap, norm=mappable.norm)    
+    # surf = ax.plot_surface(x, y, z, rstride=1, cstride=1, facecolors=rgb,
+    #                     linewidth=1, antialiased=False, shade=False,
+    #                     cmap=mappable.cmap, norm=mappable.norm)    
+    
+    surf = ax.plot_surface(x, y, z, cmap="plasma", linewidth=0, antialiased=False, shade=False, alpha=0.5)    
     ax.set_xlabel("Contamination ratio of points")
     ax.set_ylabel("Contamination ratio of betas")
     ax.set_zlabel(zlabel, rotation=90)
-    ax.set_box_aspect(aspect=None, zoom=0.98)
+    ax.set_box_aspect(aspect=None, zoom=0.95)
     ax.view_init(35, 260)
     fig.tight_layout()
     ax.set_title(title, y=1.0)
-    fig.colorbar(mappable)
-    plt.savefig("./figures/" + title)
+    fig.colorbar(surf, shrink=0.5, aspect=20, pad=-0.06)
+    plt.xticks(np.arange(min_num, max_num + 0.1, 0.1))
+    if save:
+        plt.savefig("./figures/" + title, bbox_inches='tight', pad_inches=0)
     plt.show()
 
 
@@ -342,7 +354,7 @@ def plot_cov_ellipse(cov: np.ndarray, pos: np.ndarray, nstd: float = 2, ax: plt.
 
 
 def sub_plots(
-        custom_plot: Callable[[plt.Axes, str, Dict[str, Any]], None],
+        plot_func: Callable[[plt.Axes, str, Dict[str, Any]], None],
         data: Dict[str, Any],
         x_label: str,
         y_label: str,
@@ -360,8 +372,8 @@ def sub_plots(
 
     Parameters
     ----------
-    custom_plot : Callable[[plt.Axes, str, Dict[str, Any]], None]
-        The custom plotting function to be applied on each subplot.
+    plot_func : Callable[[plt.Axes, str, Dict[str, Any]], None]
+        The plotting function to be applied on each subplot.
         It should take three arguments: the subplot axis, the name of the data,
         and the data itself.
     data : Dict[str, Any]
@@ -400,11 +412,11 @@ def sub_plots(
     for name in data:
         i = times // plot_dim[1]
         j = times % plot_dim[1]
-        custom_plot(axes[i][j], name, data, **kwargs)
+        plot_func(axes[i][j], name, data, **kwargs)
         times += 1
     fig.tight_layout(rect=[0.04, 0.09, 1, 0.95])
-    fig.supxlabel(x_label, fontsize=30)
-    fig.supylabel(y_label, fontsize=30)
+    fig.supxlabel(x_label, fontsize=35)
+    fig.supylabel(y_label, fontsize=35)
     if legend is not None:
         if "handles" not in legend and "labels" not in legend:
             labels_handles = {label: handle for ax in fig.axes for handle, label in zip(*ax.get_legend_handles_labels())}
@@ -550,7 +562,8 @@ def density_plot(
     densities_data: Dict[str, List[np.ndarray]],
     start_radius: float,
     max_radius: float,
-    gap: float
+    gap: float,
+    q_scores: Dict[str, np.ndarray] = None
 ) -> None:
     """
     Plot the density maps for weighted empirical Bayesian analysis.
@@ -577,9 +590,19 @@ def density_plot(
 
     x = np.arange(start_radius, max_radius + gap, gap)
     for density in densities_data[name]:
-        ax.plot(x, density[:len(x)], linewidth=3, alpha=0.3, label="map")
+        ax.plot(x, density[:len(x)], linewidth=3, alpha=0.3, label="map", c="orange")
     ax.text(0.8, 0.8, f"{name} \n ({len(densities_data[name])})", horizontalalignment='center', verticalalignment='top', transform=ax.transAxes)
     ax.axvline(x=1, color = 'red', label = 'unit radius', linestyle = '--')
+    if q_scores is not None:
+        densities = densities_data[name]
+        q_score = q_scores[name]
+        density_poorest = densities[np.where(q_score == np.min(q_score))].reshape(-1)
+        density_best = densities[np.where(q_score == np.max(q_score))].reshape(-1)
+        ax.plot(x, density_poorest[:len(x)], linewidth=3, label="map", c="green", alpha=1)
+        ax.plot(x, density_best[:len(x)], linewidth=3, label="map", c="blue", alpha=1)
+        ax.text(x[int(len(x) / 4)], density_poorest[int(len(x) / 2)], f"Q = {round(np.min(q_score), 4)}", horizontalalignment='left', verticalalignment='top', color="green", fontsize=20)
+        ax.text(x[int(len(x) / 4)], density_best[int(len(x) / 4)], f"Q = {round(np.max(q_score), 4)}", horizontalalignment='left', verticalalignment='bottom', color="blue", fontsize=20)
+            
 
     
 def fitted_density_plot(
