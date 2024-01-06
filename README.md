@@ -54,7 +54,7 @@ data = web.read_data(
     )
 
 # Fit the model
-_ = web.paramters_initial()
+_ = web.parameters_initial()
 betas_WEB, histories = web.WEB_iter()
 
 # Plot fitted result
